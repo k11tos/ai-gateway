@@ -10,9 +10,7 @@ logger = logging.getLogger("ai_gateway")
 logger.setLevel(logging.INFO)
 
 file_handler = logging.FileHandler(LOG_FILE)
-formatter = logging.Formatter(
-    "%(asctime)s | %(levelname)s | %(message)s"
-)
+formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
 
 file_handler.setFormatter(formatter)
 
