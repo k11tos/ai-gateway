@@ -1,6 +1,6 @@
 OLLAMA_BASE_URL = "http://desktop.home:11434"
 
-DEFAULT_MODEL = "deepseek-r1:1.5b"
+DEFAULT_MODEL = "deepseek-r1:8b"
 
 REQUEST_TIMEOUT = 120
 RETRY_COUNT = 2
