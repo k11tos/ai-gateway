@@ -1,9 +1,16 @@
+import os
 import time
 
 import requests
+from dotenv import load_dotenv
 
-from config import OLLAMA_BASE_URL, REQUEST_TIMEOUT, RETRY_COUNT
 from logger import logger
+
+load_dotenv()
+
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://desktop.home:11434")
+REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "120"))
+RETRY_COUNT = int(os.environ.get("RETRY_COUNT", "2"))
 
 
 def generate(prompt, model):

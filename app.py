@@ -1,12 +1,17 @@
+import os
 import time
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from config import DEFAULT_MODEL
 from logger import logger
 from ollama_client import embedding, generate, generate_stream, list_models
+
+load_dotenv()
+
+DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
 
 app = FastAPI(title="AI Gateway")
 
