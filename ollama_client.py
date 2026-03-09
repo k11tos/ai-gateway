@@ -9,7 +9,7 @@ from logger import logger
 load_dotenv()
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://desktop.home:11434")
-REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "120"))
+REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "90"))
 RETRY_COUNT = int(os.environ.get("RETRY_COUNT", "2"))
 
 
