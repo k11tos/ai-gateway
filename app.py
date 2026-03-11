@@ -4,6 +4,7 @@ import time
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi import Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -28,6 +29,17 @@ class ChatRequest(BaseModel):
     model: str | None = None
 
 
+def _generate_response(req: ChatRequest):
+    model = req.model or DEFAULT_MODEL
+
+    try:
+        response = generate(prompt=req.prompt, model=model)
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    return {"model": model, "response": response}
+
+
 @app.get("/health")
 def health():
     logger.info("health check")
@@ -37,14 +49,7 @@ def health():
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    model = req.model or DEFAULT_MODEL
-
-    try:
-        response = generate(prompt=req.prompt, model=model)
-    except UpstreamServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-
-    return {"model": model, "response": response}
+    return _generate_response(req)
 
 
 @app.get("/models")
@@ -55,29 +60,24 @@ def models():
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
-class GenerateRequest(BaseModel):
-    prompt: str
-    model: str | None = None
-
-
-@app.post("/generate")
-def generate_api(req: GenerateRequest):
+@app.post("/generate", deprecated=True)
+def generate_api(req: ChatRequest, response: Response):
     start = time.time()
 
     model = req.model or DEFAULT_MODEL
 
     logger.info(f"GENERATE request model={model}")
 
-    try:
-        response = generate(prompt=req.prompt, model=model)
-    except UpstreamServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    api_response = _generate_response(req)
+
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = '</chat>; rel="successor-version"'
 
     elapsed = round(time.time() - start, 2)
 
     logger.info(f"GENERATE response time={elapsed}s")
 
-    return {"model": model, "response": response}
+    return api_response
 
 
 class EmbeddingRequest(BaseModel):
@@ -95,7 +95,7 @@ def embedding_api(req: EmbeddingRequest):
 
 
 @app.post("/generate_stream")
-def generate_stream_api(req: GenerateRequest):
+def generate_stream_api(req: ChatRequest):
     model = req.model or DEFAULT_MODEL
 
     logger.info(f"STREAM request model={model}")
