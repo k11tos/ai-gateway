@@ -14,6 +14,7 @@ from ollama_client import (
     embedding,
     generate,
     generate_stream,
+    health_check,
     list_models,
 )
 
@@ -44,7 +45,12 @@ def _generate_response(req: ChatRequest):
 def health():
     logger.info("health check")
 
-    return {"status": "ok"}
+    try:
+        health_check()
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    return {"status": "ok", "upstream": "ok"}
 
 
 @app.post("/chat")
