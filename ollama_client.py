@@ -17,6 +17,23 @@ class UpstreamServiceError(Exception):
     """Raised when Ollama cannot be reached or returns an invalid response."""
 
 
+def _parse_json_object(response, endpoint):
+    try:
+        data = response.json()
+    except ValueError as e:
+        logger.error(f"Invalid Ollama {endpoint} JSON payload: {e}")
+        raise UpstreamServiceError(f"Ollama {endpoint} response invalid") from e
+
+    if not isinstance(data, dict):
+        logger.error(
+            f"Invalid Ollama {endpoint} payload type: "
+            f"expected object, got {type(data).__name__}"
+        )
+        raise UpstreamServiceError(f"Ollama {endpoint} response invalid")
+
+    return data
+
+
 def generate(prompt, model):
     logger.info(f"LLM call model={model}")
     payload = {"model": model, "prompt": prompt, "stream": False}
@@ -27,7 +44,8 @@ def generate(prompt, model):
                 f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=REQUEST_TIMEOUT
             )
             r.raise_for_status()
-            return r.json()["response"]
+            data = _parse_json_object(r, "generate")
+            return data["response"]
         except requests.exceptions.RequestException as e:
             if attempt >= RETRY_COUNT:
                 logger.error(f"Ollama generate failed after {RETRY_COUNT} retries: {e}")
@@ -37,7 +55,7 @@ def generate(prompt, model):
                 f"Ollama connection issue: {e}. "
                 f"Retrying ({attempt + 1}/{RETRY_COUNT})..."
             )
-        except (ValueError, KeyError) as e:
+        except (KeyError, TypeError) as e:
             logger.error(f"Invalid Ollama generate response payload: {e}")
             raise UpstreamServiceError("Ollama generate response invalid") from e
 
@@ -46,11 +64,14 @@ def list_models():
     try:
         r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
-        data = r.json()
+        data = _parse_json_object(r, "list models")
         return [m["name"] for m in data.get("models", [])]
     except requests.exceptions.RequestException as e:
         logger.error(f"Ollama list models failed: {e}")
         raise UpstreamServiceError("Ollama list models request failed") from e
+    except (KeyError, TypeError) as e:
+        logger.error(f"Invalid Ollama list models response payload: {e}")
+        raise UpstreamServiceError("Ollama list models response invalid") from e
 
 
 def embedding(text, model="nomic-embed-text"):
@@ -64,7 +85,8 @@ def embedding(text, model="nomic-embed-text"):
                 timeout=REQUEST_TIMEOUT,
             )
             r.raise_for_status()
-            return r.json()["embedding"]
+            data = _parse_json_object(r, "embedding")
+            return data["embedding"]
         except requests.exceptions.RequestException as e:
             if attempt >= RETRY_COUNT:
                 logger.error(
@@ -76,7 +98,7 @@ def embedding(text, model="nomic-embed-text"):
                 f"Ollama connection issue: {e}. "
                 f"Retrying ({attempt + 1}/{RETRY_COUNT})..."
             )
-        except (ValueError, KeyError) as e:
+        except (KeyError, TypeError) as e:
             logger.error(f"Invalid Ollama embedding response payload: {e}")
             raise UpstreamServiceError("Ollama embedding response invalid") from e
 
