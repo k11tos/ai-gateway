@@ -104,13 +104,11 @@ def generate_stream(prompt, model):
 
 def _iter_stream_lines(response):
     try:
-        for line in response.iter_lines():
+        for line in response.iter_lines(decode_unicode=True):
             if not line:
                 continue
 
-            data = line.decode("utf-8")
+            yield f"{line}\n"
 
-            yield f"{data}\n"
     finally:
         response.close()
-        yield f"{data}\n"
