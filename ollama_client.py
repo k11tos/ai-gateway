@@ -51,9 +51,6 @@ def list_models():
     except requests.exceptions.RequestException as e:
         logger.error(f"Ollama list models failed: {e}")
         raise UpstreamServiceError("Ollama list models request failed") from e
-    except (ValueError, KeyError, TypeError) as e:
-        logger.error(f"Invalid Ollama list models response payload: {e}")
-        raise UpstreamServiceError("Ollama list models response invalid") from e
 
 
 def embedding(text, model="nomic-embed-text"):
@@ -110,12 +107,11 @@ def generate_stream(prompt, model):
 
 def _iter_stream_lines(response):
     try:
-        for line in response.iter_lines():
+        for line in response.iter_lines(decode_unicode=True):
             if not line:
                 continue
 
-            data = line.decode("utf-8")
+            yield f"{line}\n"
 
-            yield f"{data}\n"
     finally:
         response.close()
