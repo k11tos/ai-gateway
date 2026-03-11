@@ -13,6 +13,10 @@ REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "90"))
 RETRY_COUNT = int(os.environ.get("RETRY_COUNT", "2"))
 
 
+class UpstreamServiceError(Exception):
+    """Raised when Ollama cannot be reached or returns an invalid response."""
+
+
 def generate(prompt, model):
     logger.info(f"LLM call model={model}")
     payload = {"model": model, "prompt": prompt, "stream": False}
@@ -27,7 +31,7 @@ def generate(prompt, model):
         except requests.exceptions.RequestException as e:
             if attempt >= RETRY_COUNT:
                 logger.error(f"Ollama generate failed after {RETRY_COUNT} retries: {e}")
-                raise
+                raise UpstreamServiceError("Ollama generate request failed") from e
             time.sleep(2**attempt)
             logger.warning(
                 f"Ollama connection issue: {e}. "
@@ -36,13 +40,14 @@ def generate(prompt, model):
 
 
 def list_models():
-    r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
-
-    r.raise_for_status()
-
-    data = r.json()
-
-    return [m["name"] for m in data.get("models", [])]
+    try:
+        r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        return [m["name"] for m in data.get("models", [])]
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ollama list models failed: {e}")
+        raise UpstreamServiceError("Ollama list models request failed") from e
 
 
 def embedding(text, model="nomic-embed-text"):
@@ -55,20 +60,22 @@ def embedding(text, model="nomic-embed-text"):
                 json=payload,
                 timeout=REQUEST_TIMEOUT,
             )
-            if r.status_code != 200:
-                raise Exception(f"Ollama embedding error: {r.text}")
+            r.raise_for_status()
             return r.json()["embedding"]
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             if attempt >= RETRY_COUNT:
                 logger.error(
                     f"Ollama embedding failed after {RETRY_COUNT} retries: {e}"
                 )
-                raise
+                raise UpstreamServiceError("Ollama embedding request failed") from e
             time.sleep(2**attempt)
             logger.warning(
                 f"Ollama connection issue: {e}. "
                 f"Retrying ({attempt + 1}/{RETRY_COUNT})..."
             )
+        except (ValueError, KeyError) as e:
+            logger.error(f"Invalid Ollama embedding response payload: {e}")
+            raise UpstreamServiceError("Ollama embedding response invalid") from e
 
 
 def generate_stream(prompt, model):
@@ -87,7 +94,7 @@ def generate_stream(prompt, model):
         except requests.exceptions.RequestException as e:
             if attempt >= RETRY_COUNT:
                 logger.error(f"Ollama stream failed after {RETRY_COUNT} retries: {e}")
-                raise
+                raise UpstreamServiceError("Ollama stream request failed") from e
             time.sleep(2**attempt)
             logger.warning(
                 f"Ollama connection issue: {e}. "
@@ -100,4 +107,4 @@ def generate_stream(prompt, model):
 
         data = line.decode("utf-8")
 
-        yield data
+        yield f"{data}\n"
