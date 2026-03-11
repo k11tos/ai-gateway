@@ -37,6 +37,9 @@ def generate(prompt, model):
                 f"Ollama connection issue: {e}. "
                 f"Retrying ({attempt + 1}/{RETRY_COUNT})..."
             )
+        except (ValueError, KeyError) as e:
+            logger.error(f"Invalid Ollama generate response payload: {e}")
+            raise UpstreamServiceError("Ollama generate response invalid") from e
 
 
 def list_models():
