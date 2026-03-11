@@ -113,3 +113,4 @@ def _iter_stream_lines(response):
             yield f"{data}\n"
     finally:
         response.close()
+        yield f"{data}\n"
