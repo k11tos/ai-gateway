@@ -3,11 +3,18 @@ import time
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from logger import logger
-from ollama_client import embedding, generate, generate_stream, list_models
+from ollama_client import (
+    UpstreamServiceError,
+    embedding,
+    generate,
+    generate_stream,
+    list_models,
+)
 
 load_dotenv()
 
@@ -32,14 +39,20 @@ def health():
 def chat(req: ChatRequest):
     model = req.model or DEFAULT_MODEL
 
-    response = generate(prompt=req.prompt, model=model)
+    try:
+        response = generate(prompt=req.prompt, model=model)
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     return {"model": model, "response": response}
 
 
 @app.get("/models")
 def models():
-    return {"models": list_models()}
+    try:
+        return {"models": list_models()}
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 class GenerateRequest(BaseModel):
@@ -55,7 +68,10 @@ def generate_api(req: GenerateRequest):
 
     logger.info(f"GENERATE request model={model}")
 
-    response = generate(prompt=req.prompt, model=model)
+    try:
+        response = generate(prompt=req.prompt, model=model)
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     elapsed = round(time.time() - start, 2)
 
@@ -70,7 +86,10 @@ class EmbeddingRequest(BaseModel):
 
 @app.post("/embedding")
 def embedding_api(req: EmbeddingRequest):
-    vector = embedding(req.text)
+    try:
+        vector = embedding(req.text)
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     return {"embedding": vector}
 
@@ -81,6 +100,9 @@ def generate_stream_api(req: GenerateRequest):
 
     logger.info(f"STREAM request model={model}")
 
-    generator = generate_stream(prompt=req.prompt, model=model)
+    try:
+        generator = generate_stream(prompt=req.prompt, model=model)
+    except UpstreamServiceError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
-    return StreamingResponse(generator, media_type="application/json")
+    return StreamingResponse(generator, media_type="application/x-ndjson")
