@@ -74,6 +74,16 @@ def list_models():
         raise UpstreamServiceError("Ollama list models response invalid") from e
 
 
+def health_check():
+    try:
+        r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        _parse_json_object(r, "health check")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ollama health check failed: {e}")
+        raise UpstreamServiceError("Ollama health check request failed") from e
+
+
 def embedding(text, model="nomic-embed-text"):
     payload = {"model": model, "prompt": text}
 
