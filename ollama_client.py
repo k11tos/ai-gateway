@@ -90,7 +90,7 @@ def generate_stream(prompt, model):
                 timeout=REQUEST_TIMEOUT,
             )
             r.raise_for_status()
-            break
+            return _iter_stream_lines(r)
         except requests.exceptions.RequestException as e:
             if attempt >= RETRY_COUNT:
                 logger.error(f"Ollama stream failed after {RETRY_COUNT} retries: {e}")
@@ -101,10 +101,16 @@ def generate_stream(prompt, model):
                 f"Retrying ({attempt + 1}/{RETRY_COUNT})..."
             )
 
-    for line in r.iter_lines():
-        if not line:
-            continue
 
-        data = line.decode("utf-8")
+def _iter_stream_lines(response):
+    try:
+        for line in response.iter_lines():
+            if not line:
+                continue
 
+            data = line.decode("utf-8")
+
+            yield f"{data}\n"
+    finally:
+        response.close()
         yield f"{data}\n"
