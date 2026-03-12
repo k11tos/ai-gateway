@@ -41,9 +41,16 @@ def _generate_response(req: ChatRequest):
     return {"model": model, "response": response}
 
 
-@app.get("/health")
-def health():
-    logger.info("health check")
+@app.get("/health/live")
+def health_live():
+    logger.info("liveness check")
+
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready():
+    logger.info("readiness check")
 
     try:
         health_check()
@@ -51,6 +58,11 @@ def health():
         raise HTTPException(status_code=503, detail=str(e)) from e
 
     return {"status": "ok", "upstream": "ok"}
+
+
+@app.get("/health")
+def health():
+    return health_ready()
 
 
 @app.post("/chat")
