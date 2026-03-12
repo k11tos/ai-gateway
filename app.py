@@ -1,3 +1,4 @@
+import json
 import os
 import time
 
@@ -119,8 +120,43 @@ def generate_stream_api(req: ChatRequest):
     logger.info(f"STREAM request model={model}")
 
     try:
-        generator = generate_stream(prompt=req.prompt, model=model)
+        upstream_generator = generate_stream(prompt=req.prompt, model=model)
     except UpstreamServiceError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
+    generator = _normalize_upstream_stream_events(upstream_generator)
+
     return StreamingResponse(generator, media_type="application/x-ndjson")
+
+
+def _normalize_upstream_stream_events(upstream_generator):
+    done_emitted = False
+
+    for raw_line in upstream_generator:
+        line = raw_line.strip()
+
+        if not line:
+            continue
+
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning("Skipping invalid upstream stream payload")
+            continue
+
+        if not isinstance(event, dict):
+            logger.warning("Skipping non-object upstream stream payload")
+            continue
+
+        chunk = event.get("response")
+
+        if isinstance(chunk, str) and chunk:
+            yield json.dumps({"response": chunk, "done": False}) + "\n"
+
+        if event.get("done") is True:
+            yield json.dumps({"done": True}) + "\n"
+            done_emitted = True
+            break
+
+    if not done_emitted:
+        yield json.dumps({"done": True}) + "\n"
