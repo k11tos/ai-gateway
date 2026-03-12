@@ -1,5 +1,6 @@
 import os
 import time
+from threading import local
 
 import requests
 from dotenv import load_dotenv
@@ -11,10 +12,21 @@ load_dotenv()
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://desktop.home:11434")
 REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "90"))
 RETRY_COUNT = int(os.environ.get("RETRY_COUNT", "2"))
+_thread_local = local()
 
 
 class UpstreamServiceError(Exception):
     """Raised when Ollama cannot be reached or returns an invalid response."""
+
+
+def _get_session():
+    session = getattr(_thread_local, "session", None)
+
+    if session is None:
+        session = requests.Session()
+        _thread_local.session = session
+
+    return session
 
 
 def _parse_json_object(response, endpoint):
@@ -40,7 +52,7 @@ def generate(prompt, model):
 
     for attempt in range(RETRY_COUNT + 1):
         try:
-            r = requests.post(
+            r = _get_session().post(
                 f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=REQUEST_TIMEOUT
             )
             r.raise_for_status()
@@ -62,7 +74,7 @@ def generate(prompt, model):
 
 def list_models():
     try:
-        r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
+        r = _get_session().get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         data = _parse_json_object(r, "list models")
         return [m["name"] for m in data.get("models", [])]
@@ -76,7 +88,7 @@ def list_models():
 
 def health_check():
     try:
-        r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
+        r = _get_session().get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         _parse_json_object(r, "health check")
     except requests.exceptions.RequestException as e:
@@ -89,7 +101,7 @@ def embedding(text, model="nomic-embed-text"):
 
     for attempt in range(RETRY_COUNT + 1):
         try:
-            r = requests.post(
+            r = _get_session().post(
                 f"{OLLAMA_BASE_URL}/api/embeddings",
                 json=payload,
                 timeout=REQUEST_TIMEOUT,
@@ -118,7 +130,7 @@ def generate_stream(prompt, model):
 
     for attempt in range(RETRY_COUNT + 1):
         try:
-            r = requests.post(
+            r = _get_session().post(
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json=payload,
                 stream=True,
