@@ -1,0 +1,75 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  pr-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint (if linter is installed)
+        run: |
+          set -euo pipefail
+          if python -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('ruff') else 1)"; then
+            echo "Running ruff check"
+            python -m ruff check .
+          elif python -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('flake8') else 1)"; then
+            echo "Running flake8"
+            python -m flake8 .
+          else
+            echo "No supported linter installed; skipping lint."
+          fi
+
+      - name: Python syntax validation
+        run: |
+          set -euo pipefail
+          python -m compileall -q .
+
+      - name: Validate application import
+        run: |
+          set -euo pipefail
+          python -c "import app; assert hasattr(app, 'app'), 'Expected FastAPI app instance `app` in app.py'; print('Imported app module successfully')"
+
+      - name: FastAPI lightweight startup check
+        run: |
+          set -euo pipefail
+          python -c "from fastapi.testclient import TestClient; from app import app; resp = TestClient(app).get('/health/live'); assert resp.status_code == 200, f'Unexpected status: {resp.status_code}'; print('/health/live returned 200')"
+
+      - name: Run pytest (if tests exist)
+        run: |
+          set -euo pipefail
+
+          test_file="$(find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)"
+          if [[ -z "${test_file}" ]]; then
+            echo "No tests detected; skipping pytest."
+            exit 0
+          fi
+
+          if ! python -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pytest') else 1)"; then
+            echo "Tests detected but pytest is not installed."
+            exit 1
+          fi
+
+          python -m pytest -q
