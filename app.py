@@ -33,13 +33,14 @@ class ChatRequest(BaseModel):
     model: str | None = None
 
 
-def _generate_response(req: ChatRequest):
+def _generate_response(req: ChatRequest, request_id: str | None = None):
     model = req.model or DEFAULT_MODEL
 
     try:
         response = generate(prompt=req.prompt, model=model)
     except UpstreamServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        headers = {"X-Request-Id": request_id} if request_id else None
+        raise HTTPException(status_code=502, detail=str(e), headers=headers) from e
 
     return {"model": model, "response": response}
 
@@ -80,7 +81,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
 
     logger.info(f"chat_request request_id={request_id} model={model}")
 
-    api_response = _generate_response(req)
+    api_response = _generate_response(req, request_id=request_id)
     response.headers["X-Request-Id"] = request_id
 
     elapsed = round(time.time() - start, 2)
@@ -101,7 +102,11 @@ def models(request: Request, response: Response):
     try:
         api_response = {"models": list_models()}
     except UpstreamServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(
+            status_code=502,
+            detail=str(e),
+            headers={"X-Request-Id": request_id},
+        ) from e
 
     response.headers["X-Request-Id"] = request_id
 
@@ -120,7 +125,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
 
     logger.info(f"generate_request request_id={request_id} model={model}")
 
-    api_response = _generate_response(req)
+    api_response = _generate_response(req, request_id=request_id)
 
     response.headers["X-Request-Id"] = request_id
     response.headers["Deprecation"] = "true"
@@ -149,7 +154,11 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
     try:
         vector = embedding(req.text)
     except UpstreamServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(
+            status_code=502,
+            detail=str(e),
+            headers={"X-Request-Id": request_id},
+        ) from e
 
     response.headers["X-Request-Id"] = request_id
 
@@ -170,16 +179,26 @@ def generate_stream_api(req: ChatRequest, request: Request):
     try:
         upstream_generator = generate_stream(prompt=req.prompt, model=model)
     except UpstreamServiceError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise HTTPException(
+            status_code=502,
+            detail=str(e),
+            headers={"X-Request-Id": request_id},
+        ) from e
 
-    generator = _normalize_upstream_stream_events(upstream_generator)
-    response = StreamingResponse(generator, media_type="application/x-ndjson")
-    response.headers["X-Request-Id"] = request_id
+    def stream_with_completion_logging():
+        try:
+            yield from _normalize_upstream_stream_events(upstream_generator)
+        finally:
+            elapsed = round(time.time() - start, 2)
+            logger.info(
+                f"generate_stream_complete request_id={request_id} model={model} latency={elapsed}s"
+            )
 
-    elapsed = round(time.time() - start, 2)
-    logger.info(
-        f"generate_stream_complete request_id={request_id} model={model} latency={elapsed}s"
+    response = StreamingResponse(
+        stream_with_completion_logging(),
+        media_type="application/x-ndjson",
     )
+    response.headers["X-Request-Id"] = request_id
 
     return response
 
