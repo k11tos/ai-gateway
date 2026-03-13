@@ -52,6 +52,38 @@ def _request_id(request: Request) -> str:
     return request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
 
 
+def _latency_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _log_request_event(
+    phase: str,
+    endpoint: str,
+    request_id: str,
+    model: str | None = None,
+    outcome: str | None = None,
+    latency_ms: int | None = None,
+    error: str | None = None,
+):
+    fields = [f"phase={phase}", f"endpoint={endpoint}", f"request_id={request_id}"]
+
+    if model:
+        fields.append(f"model={model}")
+    if outcome:
+        fields.append(f"outcome={outcome}")
+    if latency_ms is not None:
+        fields.append(f"latency_ms={latency_ms}")
+    if error:
+        fields.append(f"error={error}")
+
+    message = " ".join(fields)
+
+    if outcome == "failure":
+        logger.error(message)
+    else:
+        logger.info(message)
+
+
 @app.get("/health/live")
 def health_live(request: Request, response: Response):
     request_id = _request_id(request)
@@ -63,14 +95,21 @@ def health_live(request: Request, response: Response):
 
 @app.get("/health/ready")
 def health_ready(request: Request, response: Response):
-    start = time.time()
+    start = time.perf_counter()
     request_id = _request_id(request)
-    logger.info(f"readiness_request request_id={request_id}")
+    _log_request_event("start", "/health/ready", request_id)
 
     try:
         health_check()
     except UpstreamServiceError as e:
-        logger.error(f"readiness_upstream_error request_id={request_id} error={str(e)}")
+        _log_request_event(
+            "complete",
+            "/health/ready",
+            request_id,
+            outcome="failure",
+            latency_ms=_latency_ms(start),
+            error=str(e),
+        )
         raise HTTPException(
             status_code=503,
             detail=str(e),
@@ -78,8 +117,13 @@ def health_ready(request: Request, response: Response):
         ) from e
 
     response.headers["X-Request-Id"] = request_id
-    elapsed = round(time.time() - start, 2)
-    logger.info(f"readiness_complete request_id={request_id} latency={elapsed}s")
+    _log_request_event(
+        "complete",
+        "/health/ready",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
 
     return {"status": "ok", "upstream": "ok"}
 
@@ -91,18 +135,34 @@ def health(request: Request, response: Response):
 
 @app.post("/chat")
 def chat(req: ChatRequest, request: Request, response: Response):
-    start = time.time()
+    start = time.perf_counter()
     model = req.model or DEFAULT_MODEL
     request_id = _request_id(request)
 
-    logger.info(f"chat_request request_id={request_id} model={model}")
+    _log_request_event("start", "/chat", request_id, model=model)
 
-    api_response = _generate_response(req, request_id=request_id)
+    try:
+        api_response = _generate_response(req, request_id=request_id)
+    except HTTPException as e:
+        _log_request_event(
+            "complete",
+            "/chat",
+            request_id,
+            model=model,
+            outcome="failure",
+            latency_ms=_latency_ms(start),
+            error=str(e.detail),
+        )
+        raise
+
     response.headers["X-Request-Id"] = request_id
-
-    elapsed = round(time.time() - start, 2)
-    logger.info(
-        f"chat_complete request_id={request_id} model={model} latency={elapsed}s"
+    _log_request_event(
+        "complete",
+        "/chat",
+        request_id,
+        model=model,
+        outcome="success",
+        latency_ms=_latency_ms(start),
     )
 
     return api_response
@@ -110,15 +170,22 @@ def chat(req: ChatRequest, request: Request, response: Response):
 
 @app.get("/models")
 def models(request: Request, response: Response):
-    start = time.time()
+    start = time.perf_counter()
     request_id = _request_id(request)
 
-    logger.info(f"models_request request_id={request_id}")
+    _log_request_event("start", "/models", request_id)
 
     try:
         api_response = {"models": list_models()}
     except UpstreamServiceError as e:
-        logger.error(f"models_upstream_error request_id={request_id} error={str(e)}")
+        _log_request_event(
+            "complete",
+            "/models",
+            request_id,
+            outcome="failure",
+            latency_ms=_latency_ms(start),
+            error=str(e),
+        )
         raise HTTPException(
             status_code=502,
             detail=str(e),
@@ -127,31 +194,51 @@ def models(request: Request, response: Response):
 
     response.headers["X-Request-Id"] = request_id
 
-    elapsed = round(time.time() - start, 2)
-    logger.info(f"models_complete request_id={request_id} latency={elapsed}s")
+    _log_request_event(
+        "complete",
+        "/models",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
 
     return api_response
 
 
 @app.post("/generate", deprecated=True)
 def generate_api(req: ChatRequest, request: Request, response: Response):
-    start = time.time()
+    start = time.perf_counter()
 
     model = req.model or DEFAULT_MODEL
     request_id = _request_id(request)
 
-    logger.info(f"generate_request request_id={request_id} model={model}")
+    _log_request_event("start", "/generate", request_id, model=model)
 
-    api_response = _generate_response(req, request_id=request_id)
+    try:
+        api_response = _generate_response(req, request_id=request_id)
+    except HTTPException as e:
+        _log_request_event(
+            "complete",
+            "/generate",
+            request_id,
+            model=model,
+            outcome="failure",
+            latency_ms=_latency_ms(start),
+            error=str(e.detail),
+        )
+        raise
 
     response.headers["X-Request-Id"] = request_id
     response.headers["Deprecation"] = "true"
     response.headers["Link"] = '</chat>; rel="successor-version"'
 
-    elapsed = round(time.time() - start, 2)
-
-    logger.info(
-        f"generate_complete request_id={request_id} model={model} latency={elapsed}s"
+    _log_request_event(
+        "complete",
+        "/generate",
+        request_id,
+        model=model,
+        outcome="success",
+        latency_ms=_latency_ms(start),
     )
 
     return api_response
@@ -163,15 +250,22 @@ class EmbeddingRequest(BaseModel):
 
 @app.post("/embedding")
 def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
-    start = time.time()
+    start = time.perf_counter()
     request_id = _request_id(request)
 
-    logger.info(f"embedding_request request_id={request_id}")
+    _log_request_event("start", "/embedding", request_id)
 
     try:
         vector = embedding(req.text)
     except UpstreamServiceError as e:
-        logger.error(f"embedding_upstream_error request_id={request_id} error={str(e)}")
+        _log_request_event(
+            "complete",
+            "/embedding",
+            request_id,
+            outcome="failure",
+            latency_ms=_latency_ms(start),
+            error=str(e),
+        )
         raise HTTPException(
             status_code=502,
             detail=str(e),
@@ -180,25 +274,36 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
 
     response.headers["X-Request-Id"] = request_id
 
-    elapsed = round(time.time() - start, 2)
-    logger.info(f"embedding_complete request_id={request_id} latency={elapsed}s")
+    _log_request_event(
+        "complete",
+        "/embedding",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
 
     return {"embedding": vector}
 
 
 @app.post("/generate_stream")
 def generate_stream_api(req: ChatRequest, request: Request):
-    start = time.time()
+    start = time.perf_counter()
     model = req.model or DEFAULT_MODEL
     request_id = _request_id(request)
 
-    logger.info(f"generate_stream_request request_id={request_id} model={model}")
+    _log_request_event("start", "/generate_stream", request_id, model=model)
 
     try:
         upstream_generator = generate_stream(prompt=req.prompt, model=model)
     except UpstreamServiceError as e:
-        logger.error(
-            f"generate_stream_upstream_error request_id={request_id} model={model} error={str(e)}"
+        _log_request_event(
+            "complete",
+            "/generate_stream",
+            request_id,
+            model=model,
+            outcome="failure",
+            latency_ms=_latency_ms(start),
+            error=str(e),
         )
         raise HTTPException(
             status_code=502,
@@ -208,11 +313,29 @@ def generate_stream_api(req: ChatRequest, request: Request):
 
     def stream_with_completion_logging():
         try:
-            yield from _normalize_upstream_stream_events(upstream_generator, request_id=request_id)
-        finally:
-            elapsed = round(time.time() - start, 2)
-            logger.info(
-                f"generate_stream_complete request_id={request_id} model={model} latency={elapsed}s"
+            yield from _normalize_upstream_stream_events(
+                upstream_generator,
+                request_id=request_id,
+            )
+        except Exception as e:
+            _log_request_event(
+                "complete",
+                "/generate_stream",
+                request_id,
+                model=model,
+                outcome="failure",
+                latency_ms=_latency_ms(start),
+                error=str(e),
+            )
+            raise
+        else:
+            _log_request_event(
+                "complete",
+                "/generate_stream",
+                request_id,
+                model=model,
+                outcome="success",
+                latency_ms=_latency_ms(start),
             )
 
     response = StreamingResponse(
