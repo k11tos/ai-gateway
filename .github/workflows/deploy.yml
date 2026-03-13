@@ -1,0 +1,77 @@
+name: Deploy to Raspberry Pi
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_dir:
+        description: Path to ai-gateway repository on Raspberry Pi
+        required: false
+        default: "~/ai-gateway"
+      service_name:
+        description: systemd service to restart
+        required: false
+        default: "ai-gateway"
+      health_url:
+        description: Health endpoint URL on Raspberry Pi
+        required: false
+        default: "http://127.0.0.1:8000/health/ready"
+      branch:
+        description: Git branch to deploy
+        required: false
+        default: "main"
+      startup_wait_seconds:
+        description: Seconds to wait before health check
+        required: false
+        default: "5"
+
+jobs:
+  deployment:
+    name: Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      PI_HOST: ${{ secrets.PI_HOST }}
+      PI_USER: ${{ secrets.PI_USER }}
+      PI_SSH_KEY: ${{ secrets.PI_SSH_KEY }}
+      PI_PORT: ${{ secrets.PI_PORT }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${PI_HOST:-}" ]] || { echo "Missing required secret: PI_HOST" >&2; exit 1; }
+          [[ -n "${PI_USER:-}" ]] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
+          [[ -n "${PI_SSH_KEY:-}" ]] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${PI_PORT:-22}"
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          touch ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          printf '%s\n' "${PI_SSH_KEY}" > ~/.ssh/pi_key
+          chmod 600 ~/.ssh/pi_key
+          ssh-keyscan -p "${port}" -H "${PI_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Run deploy script on Raspberry Pi
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${PI_PORT:-22}"
+
+          ssh -i ~/.ssh/pi_key -p "${port}" "${PI_USER}@${PI_HOST}" \
+            "APP_DIR='${{ inputs.app_dir }}' \
+             SERVICE_NAME='${{ inputs.service_name }}' \
+             HEALTH_URL='${{ inputs.health_url }}' \
+             BRANCH='${{ inputs.branch }}' \
+             STARTUP_WAIT_SECONDS='${{ inputs.startup_wait_seconds }}' \
+             bash -s" < scripts/deploy.sh
