@@ -312,30 +312,31 @@ def generate_stream_api(req: ChatRequest, request: Request):
         ) from e
 
     def stream_with_completion_logging():
+        outcome = "success"
+        error = None
+
         try:
             yield from _normalize_upstream_stream_events(
                 upstream_generator,
                 request_id=request_id,
             )
         except Exception as e:
-            _log_request_event(
-                "complete",
-                "/generate_stream",
-                request_id,
-                model=model,
-                outcome="failure",
-                latency_ms=_latency_ms(start),
-                error=str(e),
-            )
+            outcome = "failure"
+            error = str(e)
             raise
-        else:
+        except BaseException as e:
+            outcome = "failure"
+            error = type(e).__name__
+            raise
+        finally:
             _log_request_event(
                 "complete",
                 "/generate_stream",
                 request_id,
                 model=model,
-                outcome="success",
+                outcome=outcome,
                 latency_ms=_latency_ms(start),
+                error=error,
             )
 
     response = StreamingResponse(
