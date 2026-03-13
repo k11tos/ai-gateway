@@ -6,7 +6,6 @@ on:
       app_dir:
         description: Path to ai-gateway repository on Raspberry Pi
         required: false
-        default: "~/ai-gateway"
       service_name:
         description: systemd service to restart
         required: false
@@ -35,6 +34,7 @@ jobs:
       PI_USER: ${{ secrets.PI_USER }}
       PI_SSH_KEY: ${{ secrets.PI_SSH_KEY }}
       PI_PORT: ${{ secrets.PI_PORT }}
+      PI_APP_DIR: ${{ secrets.PI_APP_DIR }}
 
     steps:
       - name: Checkout repository
@@ -47,6 +47,9 @@ jobs:
           [[ -n "${PI_HOST:-}" ]] || { echo "Missing required secret: PI_HOST" >&2; exit 1; }
           [[ -n "${PI_USER:-}" ]] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
           [[ -n "${PI_SSH_KEY:-}" ]] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
+          if [[ -z "${{ inputs.app_dir }}" ]]; then
+            [[ -n "${PI_APP_DIR:-}" ]] || { echo "Missing required secret: PI_APP_DIR (or provide app_dir input)" >&2; exit 1; }
+          fi
 
       - name: Configure SSH
         shell: bash
@@ -67,9 +70,18 @@ jobs:
         run: |
           set -euo pipefail
           port="${PI_PORT:-22}"
+          app_dir="${{ inputs.app_dir }}"
+          if [[ -z "${app_dir}" ]]; then
+            app_dir="${PI_APP_DIR:-}"
+          fi
+
+          if [[ -z "${app_dir}" ]]; then
+            echo "APP_DIR is required. Provide workflow input app_dir or set PI_APP_DIR secret." >&2
+            exit 1
+          fi
 
           ssh -i ~/.ssh/pi_key -p "${port}" "${PI_USER}@${PI_HOST}" \
-            "APP_DIR='${{ inputs.app_dir }}' \
+            "APP_DIR='${app_dir}' \
              SERVICE_NAME='${{ inputs.service_name }}' \
              HEALTH_URL='${{ inputs.health_url }}' \
              BRANCH='${{ inputs.branch }}' \
