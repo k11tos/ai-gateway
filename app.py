@@ -39,6 +39,9 @@ def _generate_response(req: ChatRequest, request_id: str | None = None):
     try:
         response = generate(prompt=req.prompt, model=model)
     except UpstreamServiceError as e:
+        logger.error(
+            f"generate_upstream_error request_id={request_id} model={model} error={str(e)}"
+        )
         headers = {"X-Request-Id": request_id} if request_id else None
         raise HTTPException(status_code=502, detail=str(e), headers=headers) from e
 
@@ -50,27 +53,40 @@ def _request_id(request: Request) -> str:
 
 
 @app.get("/health/live")
-def health_live():
-    logger.info("liveness check")
+def health_live(request: Request, response: Response):
+    request_id = _request_id(request)
+    logger.info(f"liveness_check request_id={request_id}")
+    response.headers["X-Request-Id"] = request_id
 
     return {"status": "ok"}
 
 
 @app.get("/health/ready")
-def health_ready():
-    logger.info("readiness check")
+def health_ready(request: Request, response: Response):
+    start = time.time()
+    request_id = _request_id(request)
+    logger.info(f"readiness_request request_id={request_id}")
 
     try:
         health_check()
     except UpstreamServiceError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        logger.error(f"readiness_upstream_error request_id={request_id} error={str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+            headers={"X-Request-Id": request_id},
+        ) from e
+
+    response.headers["X-Request-Id"] = request_id
+    elapsed = round(time.time() - start, 2)
+    logger.info(f"readiness_complete request_id={request_id} latency={elapsed}s")
 
     return {"status": "ok", "upstream": "ok"}
 
 
 @app.get("/health")
-def health():
-    return health_ready()
+def health(request: Request, response: Response):
+    return health_ready(request, response)
 
 
 @app.post("/chat")
@@ -102,6 +118,7 @@ def models(request: Request, response: Response):
     try:
         api_response = {"models": list_models()}
     except UpstreamServiceError as e:
+        logger.error(f"models_upstream_error request_id={request_id} error={str(e)}")
         raise HTTPException(
             status_code=502,
             detail=str(e),
@@ -154,6 +171,7 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
     try:
         vector = embedding(req.text)
     except UpstreamServiceError as e:
+        logger.error(f"embedding_upstream_error request_id={request_id} error={str(e)}")
         raise HTTPException(
             status_code=502,
             detail=str(e),
@@ -179,6 +197,9 @@ def generate_stream_api(req: ChatRequest, request: Request):
     try:
         upstream_generator = generate_stream(prompt=req.prompt, model=model)
     except UpstreamServiceError as e:
+        logger.error(
+            f"generate_stream_upstream_error request_id={request_id} model={model} error={str(e)}"
+        )
         raise HTTPException(
             status_code=502,
             detail=str(e),
@@ -187,7 +208,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
 
     def stream_with_completion_logging():
         try:
-            yield from _normalize_upstream_stream_events(upstream_generator)
+            yield from _normalize_upstream_stream_events(upstream_generator, request_id=request_id)
         finally:
             elapsed = round(time.time() - start, 2)
             logger.info(
@@ -203,7 +224,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
     return response
 
 
-def _normalize_upstream_stream_events(upstream_generator):
+def _normalize_upstream_stream_events(upstream_generator, request_id: str | None = None):
     done_emitted = False
 
     for raw_line in upstream_generator:
@@ -215,11 +236,15 @@ def _normalize_upstream_stream_events(upstream_generator):
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
-            logger.warning("Skipping invalid upstream stream payload")
+            logger.warning(
+                f"stream_payload_invalid request_id={request_id} reason=invalid_json"
+            )
             continue
 
         if not isinstance(event, dict):
-            logger.warning("Skipping non-object upstream stream payload")
+            logger.warning(
+                f"stream_payload_invalid request_id={request_id} reason=non_object"
+            )
             continue
 
         chunk = event.get("response")
@@ -234,5 +259,6 @@ def _normalize_upstream_stream_events(upstream_generator):
 
     if not done_emitted:
         logger.warning(
-            "Upstream stream ended without explicit done event; closing without synthetic completion"
+            "stream_done_missing request_id="
+            f"{request_id} detail=upstream_ended_without_explicit_done"
         )
