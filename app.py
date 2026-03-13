@@ -1,10 +1,12 @@
 import json
 import os
 import time
+import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi import Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -42,6 +44,10 @@ def _generate_response(req: ChatRequest):
     return {"model": model, "response": response}
 
 
+def _request_id(request: Request) -> str:
+    return request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
+
+
 @app.get("/health/live")
 def health_live():
     logger.info("liveness check")
@@ -67,34 +73,64 @@ def health():
 
 
 @app.post("/chat")
-def chat(req: ChatRequest):
-    return _generate_response(req)
+def chat(req: ChatRequest, request: Request, response: Response):
+    start = time.time()
+    model = req.model or DEFAULT_MODEL
+    request_id = _request_id(request)
+
+    logger.info(f"chat_request request_id={request_id} model={model}")
+
+    api_response = _generate_response(req)
+    response.headers["X-Request-Id"] = request_id
+
+    elapsed = round(time.time() - start, 2)
+    logger.info(
+        f"chat_complete request_id={request_id} model={model} latency={elapsed}s"
+    )
+
+    return api_response
 
 
 @app.get("/models")
-def models():
+def models(request: Request, response: Response):
+    start = time.time()
+    request_id = _request_id(request)
+
+    logger.info(f"models_request request_id={request_id}")
+
     try:
-        return {"models": list_models()}
+        api_response = {"models": list_models()}
     except UpstreamServiceError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
+    response.headers["X-Request-Id"] = request_id
+
+    elapsed = round(time.time() - start, 2)
+    logger.info(f"models_complete request_id={request_id} latency={elapsed}s")
+
+    return api_response
+
 
 @app.post("/generate", deprecated=True)
-def generate_api(req: ChatRequest, response: Response):
+def generate_api(req: ChatRequest, request: Request, response: Response):
     start = time.time()
 
     model = req.model or DEFAULT_MODEL
+    request_id = _request_id(request)
 
-    logger.info(f"GENERATE request model={model}")
+    logger.info(f"generate_request request_id={request_id} model={model}")
 
     api_response = _generate_response(req)
 
+    response.headers["X-Request-Id"] = request_id
     response.headers["Deprecation"] = "true"
     response.headers["Link"] = '</chat>; rel="successor-version"'
 
     elapsed = round(time.time() - start, 2)
 
-    logger.info(f"GENERATE response time={elapsed}s")
+    logger.info(
+        f"generate_complete request_id={request_id} model={model} latency={elapsed}s"
+    )
 
     return api_response
 
@@ -104,20 +140,32 @@ class EmbeddingRequest(BaseModel):
 
 
 @app.post("/embedding")
-def embedding_api(req: EmbeddingRequest):
+def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
+    start = time.time()
+    request_id = _request_id(request)
+
+    logger.info(f"embedding_request request_id={request_id}")
+
     try:
         vector = embedding(req.text)
     except UpstreamServiceError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
+    response.headers["X-Request-Id"] = request_id
+
+    elapsed = round(time.time() - start, 2)
+    logger.info(f"embedding_complete request_id={request_id} latency={elapsed}s")
+
     return {"embedding": vector}
 
 
 @app.post("/generate_stream")
-def generate_stream_api(req: ChatRequest):
+def generate_stream_api(req: ChatRequest, request: Request):
+    start = time.time()
     model = req.model or DEFAULT_MODEL
+    request_id = _request_id(request)
 
-    logger.info(f"STREAM request model={model}")
+    logger.info(f"generate_stream_request request_id={request_id} model={model}")
 
     try:
         upstream_generator = generate_stream(prompt=req.prompt, model=model)
@@ -125,8 +173,15 @@ def generate_stream_api(req: ChatRequest):
         raise HTTPException(status_code=502, detail=str(e)) from e
 
     generator = _normalize_upstream_stream_events(upstream_generator)
+    response = StreamingResponse(generator, media_type="application/x-ndjson")
+    response.headers["X-Request-Id"] = request_id
 
-    return StreamingResponse(generator, media_type="application/x-ndjson")
+    elapsed = round(time.time() - start, 2)
+    logger.info(
+        f"generate_stream_complete request_id={request_id} model={model} latency={elapsed}s"
+    )
+
+    return response
 
 
 def _normalize_upstream_stream_events(upstream_generator):
