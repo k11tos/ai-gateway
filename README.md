@@ -18,3 +18,11 @@ pip install -r requirements.txt
 - `POST /generate`: `POST /chat`와 동일 동작(하위 호환용, deprecated)
 
 신규 클라이언트는 `POST /chat` 사용을 권장합니다.
+
+## Tests
+
+Run the full test suite with:
+
+```bash
+pytest
+```
