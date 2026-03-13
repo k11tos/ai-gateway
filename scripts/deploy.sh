@@ -50,10 +50,18 @@ git fetch --prune origin "${BRANCH}"
 
 remote_commit="$(git rev-parse "origin/${BRANCH}")"
 if [[ "${current_commit}" == "${remote_commit}" ]]; then
-  log "Already at latest commit (${current_commit}). Restarting service only."
+  log "HEAD already matches origin/${BRANCH} (${current_commit})."
 else
   log "Updating ${current_commit} -> ${remote_commit}"
-  git pull --ff-only origin "${BRANCH}"
+fi
+
+log "Checking out exact origin/${BRANCH} commit"
+git checkout -B "${BRANCH}" "origin/${BRANCH}"
+
+deployed_commit="$(git rev-parse HEAD)"
+if [[ "${deployed_commit}" != "${remote_commit}" ]]; then
+  echo "ERROR: deployment checkout mismatch (HEAD=${deployed_commit}, origin/${BRANCH}=${remote_commit})" >&2
+  exit 1
 fi
 
 new_commit="$(git rev-parse HEAD)"
