@@ -159,4 +159,6 @@ def _normalize_upstream_stream_events(upstream_generator):
             break
 
     if not done_emitted:
-        yield json.dumps({"done": True}) + "\n"
+        logger.warning(
+            "Upstream stream ended without explicit done event; closing without synthetic completion"
+        )
