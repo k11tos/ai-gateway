@@ -47,7 +47,59 @@ def test_chat_uses_default_model_when_omitted(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
-    assert response.json() == {"model": app.DEFAULT_MODEL, "response": "generated"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": app.DEFAULT_MODEL,
+        "response": "generated",
+    }
+
+
+def test_chat_accepts_ollama_provider(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post(
+        "/chat", json={"prompt": "hello", "provider": "ollama"}
+    )
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
+    assert response.json()["provider"] == app.DEFAULT_PROVIDER
+
+
+def test_chat_accepts_normalized_ollama_provider(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post(
+        "/chat", json={"prompt": "hello", "provider": " OLLAMA "}
+    )
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
+
+
+def test_chat_rejects_unsupported_provider(client):
+    response = client.post(
+        "/chat", json={"prompt": "hello", "provider": "openai"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported provider 'openai'. Supported providers: ollama"
+    }
 
 
 def test_chat_uses_explicit_model_when_provided(client, monkeypatch):
@@ -64,7 +116,11 @@ def test_chat_uses_explicit_model_when_provided(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "custom"}
-    assert response.json() == {"model": "custom", "response": "generated"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": "custom",
+        "response": "generated",
+    }
 
 
 def test_chat_applies_coder_preset(client, monkeypatch):
@@ -145,6 +201,7 @@ def test_chat_resolves_model_alias_when_configured(client, monkeypatch):
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "llama3.2:3b"}
     assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
         "model": "fast",
         "resolved_model": "llama3.2:3b",
         "response": "generated",
@@ -179,6 +236,7 @@ def test_generate_returns_requested_and_resolved_model_when_alias_matches(client
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "llama3.1:8b"}
     assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
         "model": "smart",
         "resolved_model": "llama3.1:8b",
         "response": "generated",
@@ -229,6 +287,28 @@ def test_generate_stream_returns_normalized_chunks(client, monkeypatch):
         '{"response": " world", "done": false}',
         '{"done": true}',
     ]
+
+
+def test_generate_rejects_unsupported_provider(client):
+    response = client.post(
+        "/generate", json={"prompt": "hello", "provider": "anthropic"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported provider 'anthropic'. Supported providers: ollama"
+    }
+
+
+def test_generate_stream_rejects_unsupported_provider(client):
+    response = client.post(
+        "/generate_stream", json={"prompt": "hello", "provider": "gemini"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported provider 'gemini'. Supported providers: ollama"
+    }
 
 
 def test_generate_stream_resolves_model_alias(client, monkeypatch):
@@ -286,7 +366,11 @@ def test_generate_keeps_original_model_when_alias_not_found(client, monkeypatch)
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "exact:1"}
-    assert response.json() == {"model": "exact:1", "response": "generated"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": "exact:1",
+        "response": "generated",
+    }
 
 
 def test_generate_stream_returns_502_when_dependency_fails(client, monkeypatch):
