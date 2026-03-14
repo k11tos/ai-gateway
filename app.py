@@ -2,7 +2,6 @@ import json
 import os
 import time
 import uuid
-
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -13,6 +12,9 @@ from pydantic import BaseModel
 
 from logger import logger
 from ollama_client import (
+    OLLAMA_BASE_URL,
+    REQUEST_TIMEOUT,
+    RETRY_COUNT,
     UpstreamServiceError,
     embedding,
     generate,
@@ -136,6 +138,7 @@ def _request_id(request: Request) -> str:
 
 def _latency_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
+
 
 
 def _log_request_event(
@@ -314,6 +317,31 @@ def presets(request: Request, response: Response):
     )
 
     return {"presets": list(PRESETS_API_CONTRACT)}
+
+
+@app.get("/config")
+def config(request: Request, response: Response):
+    start = time.perf_counter()
+    request_id = _request_id(request)
+
+    _log_request_event("start", "/config", request_id)
+
+    response.headers["X-Request-Id"] = request_id
+
+    _log_request_event(
+        "complete",
+        "/config",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
+
+    return {
+        "default_model": DEFAULT_MODEL,
+        "ollama_configured": bool(OLLAMA_BASE_URL),
+        "request_timeout_s": REQUEST_TIMEOUT,
+        "retry_count": RETRY_COUNT,
+    }
 
 
 @app.post("/generate", deprecated=True)

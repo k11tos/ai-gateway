@@ -49,3 +49,14 @@ def test_presets_generates_fallback_request_id(client):
     request_id = response.headers.get("X-Request-Id")
     assert request_id is not None
     assert len(request_id) == 12
+
+
+def test_config_echoes_incoming_request_id_and_logs(client, caplog):
+    caplog.set_level("INFO", logger="ai_gateway")
+
+    response = client.get("/config", headers={"X-Request-Id": "config-req-1"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-Id"] == "config-req-1"
+    assert "phase=start endpoint=/config request_id=config-req-1" in caplog.text
+    assert "phase=complete endpoint=/config request_id=config-req-1 outcome=success" in caplog.text
