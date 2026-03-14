@@ -116,3 +116,39 @@ def test_generate_stream_returns_502_when_dependency_fails(client, monkeypatch):
 
     assert response.status_code == 502
     assert response.json() == {"detail": "stream failed"}
+
+
+def test_presets_endpoint_returns_static_presets(client):
+    response = client.get("/presets", headers={"X-Request-Id": "preset-req-1"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-Id"] == "preset-req-1"
+    assert response.json() == {"presets": list(app.PRESETS_API_CONTRACT)}
+
+
+def test_presets_response_contract_shape_and_order(client):
+    response = client.get("/presets")
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert set(payload.keys()) == {"presets"}
+    assert isinstance(payload["presets"], list)
+
+    expected_names_in_order = ["normal", "coder", "english", "quant"]
+    preset_names = [preset["name"] for preset in payload["presets"]]
+    assert preset_names == expected_names_in_order
+
+    for preset in payload["presets"]:
+        assert set(preset.keys()) == {"name", "description"}
+        assert isinstance(preset["name"], str)
+        assert isinstance(preset["description"], str)
+
+
+def test_presets_names_are_unique(client):
+    response = client.get("/presets")
+
+    assert response.status_code == 200
+
+    preset_names = [preset["name"] for preset in response.json()["presets"]]
+    assert len(preset_names) == len(set(preset_names))

@@ -24,6 +24,14 @@ from ollama_client import (
 load_dotenv()
 
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
+# Client-facing API contract for /presets. Keep names, descriptions, and order stable
+# unless intentionally coordinating changes with downstream clients.
+PRESETS_API_CONTRACT = (
+    {"name": "normal", "description": "Balanced assistant for general use."},
+    {"name": "coder", "description": "Focused on programming and debugging tasks."},
+    {"name": "english", "description": "Helps improve English writing and grammar."},
+    {"name": "quant", "description": "Supports quantitative and analytical reasoning."},
+)
 
 app = FastAPI(title="AI Gateway")
 
@@ -203,6 +211,26 @@ def models(request: Request, response: Response):
     )
 
     return api_response
+
+
+@app.get("/presets")
+def presets(request: Request, response: Response):
+    start = time.perf_counter()
+    request_id = _request_id(request)
+
+    _log_request_event("start", "/presets", request_id)
+
+    response.headers["X-Request-Id"] = request_id
+
+    _log_request_event(
+        "complete",
+        "/presets",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
+
+    return {"presets": list(PRESETS_API_CONTRACT)}
 
 
 @app.post("/generate", deprecated=True)
