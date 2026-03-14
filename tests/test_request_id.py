@@ -40,3 +40,12 @@ def test_presets_logs_request_start_and_complete(client, caplog):
     assert response.status_code == 200
     assert "phase=start endpoint=/presets request_id=preset-log-1" in caplog.text
     assert "phase=complete endpoint=/presets request_id=preset-log-1 outcome=success" in caplog.text
+
+
+def test_presets_generates_fallback_request_id(client):
+    response = client.get("/presets")
+
+    assert response.status_code == 200
+    request_id = response.headers.get("X-Request-Id")
+    assert request_id is not None
+    assert len(request_id) == 12
