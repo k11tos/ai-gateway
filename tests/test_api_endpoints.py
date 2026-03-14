@@ -67,6 +67,68 @@ def test_chat_uses_explicit_model_when_provided(client, monkeypatch):
     assert response.json() == {"model": "custom", "response": "generated"}
 
 
+def test_chat_applies_coder_preset(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/chat", json={"prompt": "hello", "preset": "coder"})
+
+    assert response.status_code == 200
+    assert calls == {
+        "prompt": app.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello",
+        "model": app.DEFAULT_MODEL,
+    }
+
+
+def test_chat_accepts_normalized_preset_input(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/chat", json={"prompt": "hello", "preset": " CODER "})
+
+    assert response.status_code == 200
+    assert calls == {
+        "prompt": app.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello",
+        "model": app.DEFAULT_MODEL,
+    }
+
+
+def test_apply_prompt_preset_uses_same_source_as_presets_endpoint(client):
+    response = client.get("/presets")
+
+    assert response.status_code == 200
+
+    endpoint_names = [preset["name"] for preset in response.json()["presets"]]
+    shared_names = [preset["name"] for preset in app.PRESET_DEFINITIONS]
+
+    assert endpoint_names == shared_names
+
+    for preset_name in endpoint_names:
+        expected = app.PRESET_BY_NAME[preset_name]["prompt_prefix"] + "probe"
+        assert app._apply_prompt_preset("probe", preset_name) == expected
+
+
+def test_chat_rejects_unknown_preset(client):
+    response = client.post("/chat", json={"prompt": "hello", "preset": "unknown"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Unknown preset 'unknown'. Valid presets: normal, coder, english, quant"
+    )
+
+
 def test_chat_resolves_model_alias_when_configured(client, monkeypatch):
     monkeypatch.setattr(app, "MODEL_ALIASES", {"fast": "llama3.2:3b"})
     calls = {}
@@ -123,6 +185,25 @@ def test_generate_returns_requested_and_resolved_model_when_alias_matches(client
     }
 
 
+def test_generate_applies_english_preset(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/generate", json={"prompt": "hi", "preset": "english"})
+
+    assert response.status_code == 200
+    assert calls == {
+        "prompt": app.PRESET_BY_NAME["english"]["prompt_prefix"] + "hi",
+        "model": app.DEFAULT_MODEL,
+    }
+
+
 def test_generate_stream_returns_normalized_chunks(client, monkeypatch):
     seen = {}
 
@@ -169,6 +250,27 @@ def test_generate_stream_resolves_model_alias(client, monkeypatch):
     assert seen == {"prompt": "build", "model": "qwen2.5-coder:7b"}
 
 
+def test_generate_stream_applies_quant_preset(client, monkeypatch):
+    seen = {}
+
+    def fake_stream(prompt, model):
+        seen["prompt"] = prompt
+        seen["model"] = model
+        return iter(['{"done":true}\n'])
+
+    monkeypatch.setattr(app, "generate_stream", fake_stream)
+
+    response = client.post(
+        "/generate_stream", json={"prompt": "solve", "preset": "quant"}
+    )
+
+    assert response.status_code == 200
+    assert seen == {
+        "prompt": app.PRESET_BY_NAME["quant"]["prompt_prefix"] + "solve",
+        "model": app.DEFAULT_MODEL,
+    }
+
+
 def test_generate_keeps_original_model_when_alias_not_found(client, monkeypatch):
     monkeypatch.setattr(app, "MODEL_ALIASES", {"smart": "mistral:7b"})
     calls = {}
@@ -204,7 +306,12 @@ def test_presets_endpoint_returns_static_presets(client):
 
     assert response.status_code == 200
     assert response.headers["X-Request-Id"] == "preset-req-1"
-    assert response.json() == {"presets": list(app.PRESETS_API_CONTRACT)}
+    assert response.json() == {
+        "presets": [
+            {"name": p["name"], "description": p["description"]}
+            for p in app.PRESET_DEFINITIONS
+        ]
+    }
 
 
 def test_presets_response_contract_shape_and_order(client):

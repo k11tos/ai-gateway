@@ -69,12 +69,29 @@ def _load_model_aliases() -> dict[str, str]:
 MODEL_ALIASES = _load_model_aliases()
 # Client-facing API contract for /presets. Keep names, descriptions, and order stable
 # unless intentionally coordinating changes with downstream clients.
-PRESETS_API_CONTRACT = (
-    {"name": "normal", "description": "Balanced assistant for general use."},
-    {"name": "coder", "description": "Focused on programming and debugging tasks."},
-    {"name": "english", "description": "Helps improve English writing and grammar."},
-    {"name": "quant", "description": "Supports quantitative and analytical reasoning."},
+PRESET_DEFINITIONS = (
+    {
+        "name": "normal",
+        "description": "Balanced assistant for general use.",
+        "prompt_prefix": "",
+    },
+    {
+        "name": "coder",
+        "description": "Focused on programming and debugging tasks.",
+        "prompt_prefix": "You are a practical coding assistant. Be precise and production-minded.\n\n",
+    },
+    {
+        "name": "english",
+        "description": "Helps improve English writing and grammar.",
+        "prompt_prefix": "You are an English writing helper. Improve clarity, grammar, and tone.\n\n",
+    },
+    {
+        "name": "quant",
+        "description": "Supports quantitative and analytical reasoning.",
+        "prompt_prefix": "You are a quantitative reasoning assistant. Show concise, correct math.\n\n",
+    },
 )
+PRESET_BY_NAME = {preset["name"]: preset for preset in PRESET_DEFINITIONS}
 
 app = FastAPI(title="AI Gateway")
 
@@ -82,6 +99,31 @@ app = FastAPI(title="AI Gateway")
 class ChatRequest(BaseModel):
     prompt: str
     model: str | None = None
+    preset: str | None = None
+
+
+def _normalize_preset_name(preset: str | None) -> str | None:
+    if preset is None:
+        return None
+
+    return preset.strip().lower()
+
+
+def _apply_prompt_preset(prompt: str, preset: str | None) -> str:
+    normalized_preset = _normalize_preset_name(preset)
+
+    if normalized_preset is None:
+        return prompt
+
+    preset_config = PRESET_BY_NAME.get(normalized_preset)
+    if preset_config is None:
+        valid_presets = ", ".join(PRESET_BY_NAME)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown preset '{preset}'. Valid presets: {valid_presets}",
+        )
+
+    return f"{preset_config['prompt_prefix']}{prompt}"
 
 
 def _resolve_model_for_request(
@@ -146,6 +188,7 @@ def _log_request_event(
     endpoint: str,
     request_id: str,
     model: str | None = None,
+    preset: str | None = None,
     outcome: str | None = None,
     latency_ms: int | None = None,
     error: str | None = None,
@@ -154,6 +197,8 @@ def _log_request_event(
 
     if model:
         fields.append(f"model={model}")
+    if preset:
+        fields.append(f"preset={preset}")
     if outcome:
         fields.append(f"outcome={outcome}")
     if latency_ms is not None:
@@ -228,11 +273,20 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id=request_id,
     )
 
-    _log_request_event("start", "/chat", request_id, model=requested_model)
+    normalized_preset = _normalize_preset_name(req.preset)
+
+    _log_request_event(
+        "start",
+        "/chat",
+        request_id,
+        model=requested_model,
+        preset=normalized_preset,
+    )
 
     try:
+        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
-            prompt=req.prompt,
+            prompt=shaped_prompt,
             requested_model=requested_model,
             resolved_model=resolved_model,
             request_id=request_id,
@@ -243,6 +297,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             "/chat",
             request_id,
             model=requested_model,
+            preset=normalized_preset,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -255,6 +310,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         "/chat",
         request_id,
         model=requested_model,
+        preset=normalized_preset,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -316,7 +372,12 @@ def presets(request: Request, response: Response):
         latency_ms=_latency_ms(start),
     )
 
-    return {"presets": list(PRESETS_API_CONTRACT)}
+    return {
+        "presets": [
+            {"name": preset["name"], "description": preset["description"]}
+            for preset in PRESET_DEFINITIONS
+        ]
+    }
 
 
 @app.get("/config")
@@ -355,11 +416,20 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id=request_id,
     )
 
-    _log_request_event("start", "/generate", request_id, model=requested_model)
+    normalized_preset = _normalize_preset_name(req.preset)
+
+    _log_request_event(
+        "start",
+        "/generate",
+        request_id,
+        model=requested_model,
+        preset=normalized_preset,
+    )
 
     try:
+        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
-            prompt=req.prompt,
+            prompt=shaped_prompt,
             requested_model=requested_model,
             resolved_model=resolved_model,
             request_id=request_id,
@@ -370,6 +440,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             "/generate",
             request_id,
             model=requested_model,
+            preset=normalized_preset,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -385,6 +456,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         "/generate",
         request_id,
         model=requested_model,
+        preset=normalized_preset,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -443,18 +515,29 @@ def generate_stream_api(req: ChatRequest, request: Request):
         request_id=request_id,
     )
 
+    normalized_preset = _normalize_preset_name(req.preset)
+
     _log_request_event(
-        "start", "/generate_stream", request_id, model=requested_model
+        "start",
+        "/generate_stream",
+        request_id,
+        model=requested_model,
+        preset=normalized_preset,
     )
 
     try:
-        upstream_generator = generate_stream(prompt=req.prompt, model=resolved_model)
+        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
+        upstream_generator = generate_stream(
+            prompt=shaped_prompt,
+            model=resolved_model,
+        )
     except UpstreamServiceError as e:
         _log_request_event(
             "complete",
             "/generate_stream",
             request_id,
             model=requested_model,
+            preset=normalized_preset,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e),
@@ -488,6 +571,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
                 "/generate_stream",
                 request_id,
                 model=requested_model,
+                preset=normalized_preset,
                 outcome=outcome,
                 latency_ms=_latency_ms(start),
                 error=error,
