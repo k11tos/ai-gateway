@@ -116,3 +116,18 @@ def test_generate_stream_returns_502_when_dependency_fails(client, monkeypatch):
 
     assert response.status_code == 502
     assert response.json() == {"detail": "stream failed"}
+
+
+def test_presets_endpoint_returns_static_presets(client):
+    response = client.get("/presets", headers={"X-Request-Id": "preset-req-1"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-Id"] == "preset-req-1"
+    assert response.json() == {
+        "presets": [
+            {"name": "normal", "description": "Balanced assistant for general use."},
+            {"name": "coder", "description": "Focused on programming and debugging tasks."},
+            {"name": "english", "description": "Helps improve English writing and grammar."},
+            {"name": "quant", "description": "Supports quantitative and analytical reasoning."},
+        ]
+    }

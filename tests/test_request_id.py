@@ -30,3 +30,13 @@ def test_health_live_sets_request_id_header(client):
 
     assert response.status_code == 200
     assert response.headers["X-Request-Id"] == "health-1"
+
+
+def test_presets_logs_request_start_and_complete(client, caplog):
+    caplog.set_level("INFO", logger="ai_gateway")
+
+    response = client.get("/presets", headers={"X-Request-Id": "preset-log-1"})
+
+    assert response.status_code == 200
+    assert "phase=start endpoint=/presets request_id=preset-log-1" in caplog.text
+    assert "phase=complete endpoint=/presets request_id=preset-log-1 outcome=success" in caplog.text
