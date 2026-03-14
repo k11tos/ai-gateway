@@ -82,7 +82,11 @@ def test_chat_resolves_model_alias_when_configured(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "llama3.2:3b"}
-    assert response.json() == {"model": "llama3.2:3b", "response": "generated"}
+    assert response.json() == {
+        "model": "fast",
+        "resolved_model": "llama3.2:3b",
+        "response": "generated",
+    }
 
 
 def test_generate_endpoint_returns_502_on_upstream_error(client, monkeypatch):
@@ -95,6 +99,28 @@ def test_generate_endpoint_returns_502_on_upstream_error(client, monkeypatch):
 
     assert response.status_code == 502
     assert response.json() == {"detail": "generate failed"}
+
+
+def test_generate_returns_requested_and_resolved_model_when_alias_matches(client, monkeypatch):
+    monkeypatch.setattr(app, "MODEL_ALIASES", {"smart": "llama3.1:8b"})
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/generate", json={"prompt": "hello", "model": "smart"})
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": "llama3.1:8b"}
+    assert response.json() == {
+        "model": "smart",
+        "resolved_model": "llama3.1:8b",
+        "response": "generated",
+    }
 
 
 def test_generate_stream_returns_normalized_chunks(client, monkeypatch):
@@ -207,3 +233,31 @@ def test_presets_names_are_unique(client):
 
     preset_names = [preset["name"] for preset in response.json()["presets"]]
     assert len(preset_names) == len(set(preset_names))
+
+
+def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch, caplog):
+    monkeypatch.setenv("MODEL_ALIAS_FAST", "base-fast")
+    monkeypatch.setenv(
+        "MODEL_ALIASES",
+        "broken,no-model=,=missing-alias, smart = llama3.1:8b ,coding=qwen2.5-coder:7b",
+    )
+
+    with caplog.at_level("WARNING"):
+        aliases = app._load_model_aliases()
+
+    assert aliases["fast"] == "base-fast"
+    assert aliases["smart"] == "llama3.1:8b"
+    assert aliases["coding"] == "qwen2.5-coder:7b"
+    assert "no-model" not in aliases
+    assert "" not in aliases
+
+    messages = [record.message for record in caplog.records]
+    assert any("model_alias_config_invalid pair=broken" in message for message in messages)
+    assert any(
+        "model_alias_config_invalid_empty_model pair=no-model=" in message
+        for message in messages
+    )
+    assert any(
+        "model_alias_config_invalid_empty_alias pair==missing-alias" in message
+        for message in messages
+    )

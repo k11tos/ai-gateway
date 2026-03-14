@@ -48,8 +48,14 @@ def _load_model_aliases() -> dict[str, str]:
             normalized_alias = alias.strip()
             resolved_model = model.strip()
 
-            if normalized_alias and resolved_model:
-                aliases[normalized_alias] = resolved_model
+            if not normalized_alias:
+                logger.warning(f"model_alias_config_invalid_empty_alias pair={pair}")
+                continue
+            if not resolved_model:
+                logger.warning(f"model_alias_config_invalid_empty_model pair={pair}")
+                continue
+
+            aliases[normalized_alias] = resolved_model
 
     return {
         alias: model
@@ -97,18 +103,31 @@ def _resolve_model_for_request(
     return requested_model, resolved_model
 
 
-def _generate_response(prompt: str, model: str, request_id: str | None = None):
+def _generate_response(
+    prompt: str,
+    requested_model: str,
+    resolved_model: str,
+    request_id: str | None = None,
+):
 
     try:
-        response = generate(prompt=prompt, model=model)
+        response = generate(prompt=prompt, model=resolved_model)
     except UpstreamServiceError as e:
         logger.error(
-            f"generate_upstream_error request_id={request_id} model={model} error={str(e)}"
+            "generate_upstream_error "
+            f"request_id={request_id} "
+            f"requested_model={requested_model} "
+            f"resolved_model={resolved_model} "
+            f"error={str(e)}"
         )
         headers = {"X-Request-Id": request_id} if request_id else None
         raise HTTPException(status_code=502, detail=str(e), headers=headers) from e
 
-    return {"model": model, "response": response}
+    payload = {"model": requested_model, "response": response}
+    if requested_model != resolved_model:
+        payload["resolved_model"] = resolved_model
+
+    return payload
 
 
 def _request_id(request: Request) -> str:
@@ -211,7 +230,8 @@ def chat(req: ChatRequest, request: Request, response: Response):
     try:
         api_response = _generate_response(
             prompt=req.prompt,
-            model=resolved_model,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
             request_id=request_id,
         )
     except HTTPException as e:
@@ -312,7 +332,8 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     try:
         api_response = _generate_response(
             prompt=req.prompt,
-            model=resolved_model,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
             request_id=request_id,
         )
     except HTTPException as e:

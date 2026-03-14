@@ -50,4 +50,8 @@ Resolution rules:
 3. If no alias exists, the requested model is used unchanged.
 4. If no model is requested, `DEFAULT_MODEL` is used.
 
+Response behavior for `POST /chat` and `POST /generate`:
+- `model` always returns the client-requested model name (or `DEFAULT_MODEL` when omitted).
+- `resolved_model` is included only when alias resolution changed the upstream target model.
+
 If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_ALIASES` wins for that key.
