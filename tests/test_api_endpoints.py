@@ -235,6 +235,23 @@ def test_presets_names_are_unique(client):
     assert len(preset_names) == len(set(preset_names))
 
 
+def test_config_endpoint_returns_safe_runtime_summary(client, monkeypatch):
+    monkeypatch.setattr(app, "DEFAULT_MODEL", "deepseek-r1:8b")
+    monkeypatch.setattr(app, "OLLAMA_BASE_URL", "http://user:secret@ollama.local:11434")
+    monkeypatch.setattr(app, "REQUEST_TIMEOUT", 42)
+    monkeypatch.setattr(app, "RETRY_COUNT", 5)
+
+    response = client.get("/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "default_model": "deepseek-r1:8b",
+        "ollama_base_url": "http://ollama.local:11434",
+        "request_timeout_s": 42,
+        "retry_count": 5,
+    }
+
+
 def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch, caplog):
     monkeypatch.setenv("MODEL_ALIAS_FAST", "base-fast")
     monkeypatch.setenv(

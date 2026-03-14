@@ -2,6 +2,8 @@ import json
 import os
 import time
 import uuid
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -13,6 +15,9 @@ from pydantic import BaseModel
 
 from logger import logger
 from ollama_client import (
+    OLLAMA_BASE_URL,
+    REQUEST_TIMEOUT,
+    RETRY_COUNT,
     UpstreamServiceError,
     embedding,
     generate,
@@ -136,6 +141,20 @@ def _request_id(request: Request) -> str:
 
 def _latency_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
+
+
+def _safe_ollama_base_url() -> str:
+    parts = urlsplit(OLLAMA_BASE_URL)
+
+    if not (parts.username or parts.password or parts.query or parts.fragment):
+        return OLLAMA_BASE_URL
+
+    host = parts.hostname or ""
+
+    if parts.port is not None:
+        host = f"{host}:{parts.port}"
+
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
 
 
 def _log_request_event(
@@ -314,6 +333,31 @@ def presets(request: Request, response: Response):
     )
 
     return {"presets": list(PRESETS_API_CONTRACT)}
+
+
+@app.get("/config")
+def config(request: Request, response: Response):
+    start = time.perf_counter()
+    request_id = _request_id(request)
+
+    _log_request_event("start", "/config", request_id)
+
+    response.headers["X-Request-Id"] = request_id
+
+    _log_request_event(
+        "complete",
+        "/config",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
+
+    return {
+        "default_model": DEFAULT_MODEL,
+        "ollama_base_url": _safe_ollama_base_url(),
+        "request_timeout_s": REQUEST_TIMEOUT,
+        "retry_count": RETRY_COUNT,
+    }
 
 
 @app.post("/generate", deprecated=True)
