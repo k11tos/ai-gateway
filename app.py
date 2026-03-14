@@ -27,6 +27,7 @@ load_dotenv()
 
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
 DEFAULT_PROVIDER = "ollama"
+SUPPORTED_PROVIDERS = [DEFAULT_PROVIDER]
 
 
 def _load_model_aliases() -> dict[str, str]:
@@ -431,6 +432,29 @@ def config(request: Request, response: Response):
         "ollama_configured": bool(OLLAMA_BASE_URL),
         "request_timeout_s": REQUEST_TIMEOUT,
         "retry_count": RETRY_COUNT,
+    }
+
+
+@app.get("/providers")
+def providers(request: Request, response: Response):
+    start = time.perf_counter()
+    request_id = _request_id(request)
+
+    _log_request_event("start", "/providers", request_id)
+
+    response.headers["X-Request-Id"] = request_id
+
+    _log_request_event(
+        "complete",
+        "/providers",
+        request_id,
+        outcome="success",
+        latency_ms=_latency_ms(start),
+    )
+
+    return {
+        "supported_providers": SUPPORTED_PROVIDERS,
+        "default_provider": DEFAULT_PROVIDER,
     }
 
 

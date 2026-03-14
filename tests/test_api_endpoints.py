@@ -443,6 +443,16 @@ def test_config_endpoint_returns_safe_runtime_summary(client, monkeypatch):
     }
 
 
+def test_providers_endpoint_returns_discovery_payload(client):
+    response = client.get("/providers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supported_providers": ["ollama"],
+        "default_provider": "ollama",
+    }
+
+
 def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch, caplog):
     monkeypatch.setenv("MODEL_ALIAS_FAST", "base-fast")
     monkeypatch.setenv(
