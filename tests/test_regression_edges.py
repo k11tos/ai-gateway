@@ -96,6 +96,7 @@ def test_chat_uses_runtime_default_model_value(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
         "model": "new-default-model",
         "response": "hello:new-default-model",
     }
@@ -108,7 +109,11 @@ def test_chat_explicit_model_overrides_runtime_default(client, monkeypatch):
     response = client.post("/chat", json={"prompt": "hello", "model": "custom-model"})
 
     assert response.status_code == 200
-    assert response.json() == {"model": "custom-model", "response": "custom-model"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": "custom-model",
+        "response": "custom-model",
+    }
 
 
 def test_chat_returns_502_when_generate_dependency_fails(client, monkeypatch):

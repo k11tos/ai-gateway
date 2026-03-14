@@ -47,7 +47,11 @@ def test_chat_uses_default_model_when_omitted(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
-    assert response.json() == {"model": app.DEFAULT_MODEL, "response": "generated"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": app.DEFAULT_MODEL,
+        "response": "generated",
+    }
 
 
 def test_chat_accepts_ollama_provider(client, monkeypatch):
@@ -66,6 +70,7 @@ def test_chat_accepts_ollama_provider(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
+    assert response.json()["provider"] == app.DEFAULT_PROVIDER
 
 
 def test_chat_accepts_normalized_ollama_provider(client, monkeypatch):
@@ -111,7 +116,11 @@ def test_chat_uses_explicit_model_when_provided(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "custom"}
-    assert response.json() == {"model": "custom", "response": "generated"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": "custom",
+        "response": "generated",
+    }
 
 
 def test_chat_applies_coder_preset(client, monkeypatch):
@@ -192,6 +201,7 @@ def test_chat_resolves_model_alias_when_configured(client, monkeypatch):
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "llama3.2:3b"}
     assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
         "model": "fast",
         "resolved_model": "llama3.2:3b",
         "response": "generated",
@@ -226,6 +236,7 @@ def test_generate_returns_requested_and_resolved_model_when_alias_matches(client
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "llama3.1:8b"}
     assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
         "model": "smart",
         "resolved_model": "llama3.1:8b",
         "response": "generated",
@@ -355,7 +366,11 @@ def test_generate_keeps_original_model_when_alias_not_found(client, monkeypatch)
 
     assert response.status_code == 200
     assert calls == {"prompt": "hello", "model": "exact:1"}
-    assert response.json() == {"model": "exact:1", "response": "generated"}
+    assert response.json() == {
+        "provider": app.DEFAULT_PROVIDER,
+        "model": "exact:1",
+        "response": "generated",
+    }
 
 
 def test_generate_stream_returns_502_when_dependency_fails(client, monkeypatch):

@@ -26,6 +26,7 @@ from ollama_client import (
 load_dotenv()
 
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
+DEFAULT_PROVIDER = "ollama"
 
 
 def _load_model_aliases() -> dict[str, str]:
@@ -148,27 +149,20 @@ def _resolve_model_for_request(
     return requested_model, resolved_model
 
 
-def _normalize_provider_name(provider: str | None) -> str | None:
+def _resolve_provider_for_request(provider: str | None) -> str:
     if provider is None:
-        return None
+        return DEFAULT_PROVIDER
 
-    return provider.strip().lower()
+    resolved_provider = provider.strip().lower()
 
-
-def _ensure_supported_provider(provider: str | None) -> None:
-    normalized_provider = _normalize_provider_name(provider)
-
-    if normalized_provider is None:
-        return
-
-    if normalized_provider == "ollama":
-        return
+    if resolved_provider == DEFAULT_PROVIDER:
+        return resolved_provider
 
     raise HTTPException(
         status_code=400,
         detail=(
             f"Unsupported provider '{provider}'. "
-            "Supported providers: ollama"
+            f"Supported providers: {DEFAULT_PROVIDER}"
         ),
     )
 
@@ -177,6 +171,7 @@ def _generate_response(
     prompt: str,
     requested_model: str,
     resolved_model: str,
+    provider: str,
     request_id: str | None = None,
 ):
 
@@ -193,7 +188,7 @@ def _generate_response(
         headers = {"X-Request-Id": request_id} if request_id else None
         raise HTTPException(status_code=502, detail=str(e), headers=headers) from e
 
-    payload = {"model": requested_model, "response": response}
+    payload = {"provider": provider, "model": requested_model, "response": response}
     if requested_model != resolved_model:
         payload["resolved_model"] = resolved_model
 
@@ -303,7 +298,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    normalized_provider = _normalize_provider_name(req.provider)
+    resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
         "start",
@@ -311,16 +306,16 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=normalized_provider,
+        provider=resolved_provider,
     )
 
     try:
-        _ensure_supported_provider(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
             requested_model=requested_model,
             resolved_model=resolved_model,
+            provider=resolved_provider,
             request_id=request_id,
         )
     except HTTPException as e:
@@ -330,7 +325,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=normalized_provider,
+            provider=resolved_provider,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -344,7 +339,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=normalized_provider,
+        provider=resolved_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -451,7 +446,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    normalized_provider = _normalize_provider_name(req.provider)
+    resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
         "start",
@@ -459,16 +454,16 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=normalized_provider,
+        provider=resolved_provider,
     )
 
     try:
-        _ensure_supported_provider(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
             requested_model=requested_model,
             resolved_model=resolved_model,
+            provider=resolved_provider,
             request_id=request_id,
         )
     except HTTPException as e:
@@ -478,7 +473,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=normalized_provider,
+            provider=resolved_provider,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -495,7 +490,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=normalized_provider,
+        provider=resolved_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -555,7 +550,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    normalized_provider = _normalize_provider_name(req.provider)
+    resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
         "start",
@@ -563,11 +558,10 @@ def generate_stream_api(req: ChatRequest, request: Request):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=normalized_provider,
+        provider=resolved_provider,
     )
 
     try:
-        _ensure_supported_provider(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         upstream_generator = generate_stream(
             prompt=shaped_prompt,
@@ -580,7 +574,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=normalized_provider,
+            provider=resolved_provider,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e),
@@ -615,7 +609,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
                 request_id,
                 model=requested_model,
                 preset=normalized_preset,
-                provider=normalized_provider,
+                provider=resolved_provider,
                 outcome=outcome,
                 latency_ms=_latency_ms(start),
                 error=error,
