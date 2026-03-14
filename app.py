@@ -82,6 +82,30 @@ app = FastAPI(title="AI Gateway")
 class ChatRequest(BaseModel):
     prompt: str
     model: str | None = None
+    preset: str | None = None
+
+
+PRESET_PROMPT_PREFIXES = {
+    "normal": "",
+    "coder": "You are a practical coding assistant. Be precise and production-minded.\n\n",
+    "english": "You are an English writing helper. Improve clarity, grammar, and tone.\n\n",
+    "quant": "You are a quantitative reasoning assistant. Show concise, correct math.\n\n",
+}
+
+
+def _apply_prompt_preset(prompt: str, preset: str | None) -> str:
+    if preset is None:
+        return prompt
+
+    prefix = PRESET_PROMPT_PREFIXES.get(preset)
+    if prefix is None:
+        valid_presets = ", ".join(PRESET_PROMPT_PREFIXES)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown preset '{preset}'. Valid presets: {valid_presets}",
+        )
+
+    return f"{prefix}{prompt}"
 
 
 def _resolve_model_for_request(
@@ -231,8 +255,9 @@ def chat(req: ChatRequest, request: Request, response: Response):
     _log_request_event("start", "/chat", request_id, model=requested_model)
 
     try:
+        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
-            prompt=req.prompt,
+            prompt=shaped_prompt,
             requested_model=requested_model,
             resolved_model=resolved_model,
             request_id=request_id,
@@ -358,8 +383,9 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     _log_request_event("start", "/generate", request_id, model=requested_model)
 
     try:
+        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
-            prompt=req.prompt,
+            prompt=shaped_prompt,
             requested_model=requested_model,
             resolved_model=resolved_model,
             request_id=request_id,
@@ -448,7 +474,8 @@ def generate_stream_api(req: ChatRequest, request: Request):
     )
 
     try:
-        upstream_generator = generate_stream(prompt=req.prompt, model=resolved_model)
+        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
+        upstream_generator = generate_stream(prompt=shaped_prompt, model=resolved_model)
     except UpstreamServiceError as e:
         _log_request_event(
             "complete",
