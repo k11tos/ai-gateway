@@ -67,6 +67,24 @@ def test_chat_uses_explicit_model_when_provided(client, monkeypatch):
     assert response.json() == {"model": "custom", "response": "generated"}
 
 
+def test_chat_resolves_model_alias_when_configured(client, monkeypatch):
+    monkeypatch.setattr(app, "MODEL_ALIASES", {"fast": "llama3.2:3b"})
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/chat", json={"prompt": "hello", "model": "fast"})
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": "llama3.2:3b"}
+    assert response.json() == {"model": "llama3.2:3b", "response": "generated"}
+
+
 def test_generate_endpoint_returns_502_on_upstream_error(client, monkeypatch):
     def fail(prompt, model):
         raise UpstreamServiceError("generate failed")
@@ -104,6 +122,43 @@ def test_generate_stream_returns_normalized_chunks(client, monkeypatch):
         '{"response": " world", "done": false}',
         '{"done": true}',
     ]
+
+
+def test_generate_stream_resolves_model_alias(client, monkeypatch):
+    monkeypatch.setattr(app, "MODEL_ALIASES", {"coding": "qwen2.5-coder:7b"})
+    seen = {}
+
+    def fake_stream(prompt, model):
+        seen["prompt"] = prompt
+        seen["model"] = model
+        return iter(['{"done":true}\n'])
+
+    monkeypatch.setattr(app, "generate_stream", fake_stream)
+
+    response = client.post(
+        "/generate_stream", json={"prompt": "build", "model": "coding"}
+    )
+
+    assert response.status_code == 200
+    assert seen == {"prompt": "build", "model": "qwen2.5-coder:7b"}
+
+
+def test_generate_keeps_original_model_when_alias_not_found(client, monkeypatch):
+    monkeypatch.setattr(app, "MODEL_ALIASES", {"smart": "mistral:7b"})
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/generate", json={"prompt": "hello", "model": "exact:1"})
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": "exact:1"}
+    assert response.json() == {"model": "exact:1", "response": "generated"}
 
 
 def test_generate_stream_returns_502_when_dependency_fails(client, monkeypatch):

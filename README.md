@@ -26,3 +26,28 @@ Run the full test suite with:
 ```bash
 pytest
 ```
+
+## Model aliases
+
+You can request friendly model aliases in `POST /chat`, `POST /generate`, and `POST /generate_stream`.
+
+Configure aliases with either dedicated environment variables:
+
+- `MODEL_ALIAS_FAST`
+- `MODEL_ALIAS_SMART`
+- `MODEL_ALIAS_CODING`
+
+Or provide a comma-separated mapping with `MODEL_ALIASES`, for example:
+
+```bash
+MODEL_ALIASES="fast=llama3.2:3b,smart=llama3.1:8b,coding=qwen2.5-coder:7b"
+```
+
+Resolution rules:
+
+1. The requested model is looked up in the alias table.
+2. If an alias exists, the mapped model is sent to Ollama.
+3. If no alias exists, the requested model is used unchanged.
+4. If no model is requested, `DEFAULT_MODEL` is used.
+
+If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_ALIASES` wins for that key.

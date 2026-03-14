@@ -24,6 +24,41 @@ from ollama_client import (
 load_dotenv()
 
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
+
+
+def _load_model_aliases() -> dict[str, str]:
+    aliases = {
+        "fast": os.environ.get("MODEL_ALIAS_FAST"),
+        "smart": os.environ.get("MODEL_ALIAS_SMART"),
+        "coding": os.environ.get("MODEL_ALIAS_CODING"),
+    }
+    configured_aliases = os.environ.get("MODEL_ALIASES")
+
+    if configured_aliases:
+        for raw_pair in configured_aliases.split(","):
+            pair = raw_pair.strip()
+            if not pair:
+                continue
+
+            alias, separator, model = pair.partition("=")
+            if not separator:
+                logger.warning(f"model_alias_config_invalid pair={pair}")
+                continue
+
+            normalized_alias = alias.strip()
+            resolved_model = model.strip()
+
+            if normalized_alias and resolved_model:
+                aliases[normalized_alias] = resolved_model
+
+    return {
+        alias: model
+        for alias, model in aliases.items()
+        if isinstance(model, str) and model.strip()
+    }
+
+
+MODEL_ALIASES = _load_model_aliases()
 # Client-facing API contract for /presets. Keep names, descriptions, and order stable
 # unless intentionally coordinating changes with downstream clients.
 PRESETS_API_CONTRACT = (
@@ -41,11 +76,31 @@ class ChatRequest(BaseModel):
     model: str | None = None
 
 
-def _generate_response(req: ChatRequest, request_id: str | None = None):
-    model = req.model or DEFAULT_MODEL
+def _resolve_model_for_request(
+    model: str | None,
+    *,
+    endpoint: str,
+    request_id: str,
+) -> tuple[str, str]:
+    requested_model = model or DEFAULT_MODEL
+    resolved_model = MODEL_ALIASES.get(requested_model, requested_model)
+
+    if requested_model != resolved_model:
+        logger.info(
+            "model_alias_resolved "
+            f"endpoint={endpoint} "
+            f"request_id={request_id} "
+            f"requested_model={requested_model} "
+            f"resolved_model={resolved_model}"
+        )
+
+    return requested_model, resolved_model
+
+
+def _generate_response(prompt: str, model: str, request_id: str | None = None):
 
     try:
-        response = generate(prompt=req.prompt, model=model)
+        response = generate(prompt=prompt, model=model)
     except UpstreamServiceError as e:
         logger.error(
             f"generate_upstream_error request_id={request_id} model={model} error={str(e)}"
@@ -144,19 +199,27 @@ def health(request: Request, response: Response):
 @app.post("/chat")
 def chat(req: ChatRequest, request: Request, response: Response):
     start = time.perf_counter()
-    model = req.model or DEFAULT_MODEL
     request_id = _request_id(request)
+    requested_model, resolved_model = _resolve_model_for_request(
+        req.model,
+        endpoint="/chat",
+        request_id=request_id,
+    )
 
-    _log_request_event("start", "/chat", request_id, model=model)
+    _log_request_event("start", "/chat", request_id, model=requested_model)
 
     try:
-        api_response = _generate_response(req, request_id=request_id)
+        api_response = _generate_response(
+            prompt=req.prompt,
+            model=resolved_model,
+            request_id=request_id,
+        )
     except HTTPException as e:
         _log_request_event(
             "complete",
             "/chat",
             request_id,
-            model=model,
+            model=requested_model,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -168,7 +231,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         "complete",
         "/chat",
         request_id,
-        model=model,
+        model=requested_model,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -237,19 +300,27 @@ def presets(request: Request, response: Response):
 def generate_api(req: ChatRequest, request: Request, response: Response):
     start = time.perf_counter()
 
-    model = req.model or DEFAULT_MODEL
     request_id = _request_id(request)
+    requested_model, resolved_model = _resolve_model_for_request(
+        req.model,
+        endpoint="/generate",
+        request_id=request_id,
+    )
 
-    _log_request_event("start", "/generate", request_id, model=model)
+    _log_request_event("start", "/generate", request_id, model=requested_model)
 
     try:
-        api_response = _generate_response(req, request_id=request_id)
+        api_response = _generate_response(
+            prompt=req.prompt,
+            model=resolved_model,
+            request_id=request_id,
+        )
     except HTTPException as e:
         _log_request_event(
             "complete",
             "/generate",
             request_id,
-            model=model,
+            model=requested_model,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -264,7 +335,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         "complete",
         "/generate",
         request_id,
-        model=model,
+        model=requested_model,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -316,19 +387,25 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
 @app.post("/generate_stream")
 def generate_stream_api(req: ChatRequest, request: Request):
     start = time.perf_counter()
-    model = req.model or DEFAULT_MODEL
     request_id = _request_id(request)
+    requested_model, resolved_model = _resolve_model_for_request(
+        req.model,
+        endpoint="/generate_stream",
+        request_id=request_id,
+    )
 
-    _log_request_event("start", "/generate_stream", request_id, model=model)
+    _log_request_event(
+        "start", "/generate_stream", request_id, model=requested_model
+    )
 
     try:
-        upstream_generator = generate_stream(prompt=req.prompt, model=model)
+        upstream_generator = generate_stream(prompt=req.prompt, model=resolved_model)
     except UpstreamServiceError as e:
         _log_request_event(
             "complete",
             "/generate_stream",
             request_id,
-            model=model,
+            model=requested_model,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e),
@@ -361,7 +438,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
                 "complete",
                 "/generate_stream",
                 request_id,
-                model=model,
+                model=requested_model,
                 outcome=outcome,
                 latency_ms=_latency_ms(start),
                 error=error,
