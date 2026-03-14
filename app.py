@@ -2,9 +2,6 @@ import json
 import os
 import time
 import uuid
-from urllib.parse import urlsplit
-from urllib.parse import urlunsplit
-
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -142,19 +139,6 @@ def _request_id(request: Request) -> str:
 def _latency_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
 
-
-def _safe_ollama_base_url() -> str:
-    parts = urlsplit(OLLAMA_BASE_URL)
-
-    if not (parts.username or parts.password or parts.query or parts.fragment):
-        return OLLAMA_BASE_URL
-
-    host = parts.hostname or ""
-
-    if parts.port is not None:
-        host = f"{host}:{parts.port}"
-
-    return urlunsplit((parts.scheme, host, parts.path, "", ""))
 
 
 def _log_request_event(
@@ -354,7 +338,7 @@ def config(request: Request, response: Response):
 
     return {
         "default_model": DEFAULT_MODEL,
-        "ollama_base_url": _safe_ollama_base_url(),
+        "ollama_configured": bool(OLLAMA_BASE_URL),
         "request_timeout_s": REQUEST_TIMEOUT,
         "retry_count": RETRY_COUNT,
     }
