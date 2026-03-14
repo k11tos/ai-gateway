@@ -50,6 +50,53 @@ def test_chat_uses_default_model_when_omitted(client, monkeypatch):
     assert response.json() == {"model": app.DEFAULT_MODEL, "response": "generated"}
 
 
+def test_chat_accepts_ollama_provider(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post(
+        "/chat", json={"prompt": "hello", "provider": "ollama"}
+    )
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
+
+
+def test_chat_accepts_normalized_ollama_provider(client, monkeypatch):
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post(
+        "/chat", json={"prompt": "hello", "provider": " OLLAMA "}
+    )
+
+    assert response.status_code == 200
+    assert calls == {"prompt": "hello", "model": app.DEFAULT_MODEL}
+
+
+def test_chat_rejects_unsupported_provider(client):
+    response = client.post(
+        "/chat", json={"prompt": "hello", "provider": "openai"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported provider 'openai'. Supported providers: ollama"
+    }
+
+
 def test_chat_uses_explicit_model_when_provided(client, monkeypatch):
     calls = {}
 
@@ -229,6 +276,28 @@ def test_generate_stream_returns_normalized_chunks(client, monkeypatch):
         '{"response": " world", "done": false}',
         '{"done": true}',
     ]
+
+
+def test_generate_rejects_unsupported_provider(client):
+    response = client.post(
+        "/generate", json={"prompt": "hello", "provider": "anthropic"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported provider 'anthropic'. Supported providers: ollama"
+    }
+
+
+def test_generate_stream_rejects_unsupported_provider(client):
+    response = client.post(
+        "/generate_stream", json={"prompt": "hello", "provider": "gemini"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported provider 'gemini'. Supported providers: ollama"
+    }
 
 
 def test_generate_stream_resolves_model_alias(client, monkeypatch):

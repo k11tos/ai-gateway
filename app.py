@@ -100,6 +100,7 @@ class ChatRequest(BaseModel):
     prompt: str
     model: str | None = None
     preset: str | None = None
+    provider: str | None = None
 
 
 def _normalize_preset_name(preset: str | None) -> str | None:
@@ -147,6 +148,31 @@ def _resolve_model_for_request(
     return requested_model, resolved_model
 
 
+def _normalize_provider_name(provider: str | None) -> str | None:
+    if provider is None:
+        return None
+
+    return provider.strip().lower()
+
+
+def _ensure_supported_provider(provider: str | None) -> None:
+    normalized_provider = _normalize_provider_name(provider)
+
+    if normalized_provider is None:
+        return
+
+    if normalized_provider == "ollama":
+        return
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"Unsupported provider '{provider}'. "
+            "Supported providers: ollama"
+        ),
+    )
+
+
 def _generate_response(
     prompt: str,
     requested_model: str,
@@ -189,6 +215,7 @@ def _log_request_event(
     request_id: str,
     model: str | None = None,
     preset: str | None = None,
+    provider: str | None = None,
     outcome: str | None = None,
     latency_ms: int | None = None,
     error: str | None = None,
@@ -199,6 +226,8 @@ def _log_request_event(
         fields.append(f"model={model}")
     if preset:
         fields.append(f"preset={preset}")
+    if provider:
+        fields.append(f"provider={provider}")
     if outcome:
         fields.append(f"outcome={outcome}")
     if latency_ms is not None:
@@ -274,6 +303,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
+    normalized_provider = _normalize_provider_name(req.provider)
 
     _log_request_event(
         "start",
@@ -281,9 +311,11 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
+        provider=normalized_provider,
     )
 
     try:
+        _ensure_supported_provider(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
@@ -298,6 +330,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             request_id,
             model=requested_model,
             preset=normalized_preset,
+            provider=normalized_provider,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -311,6 +344,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
+        provider=normalized_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -417,6 +451,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
+    normalized_provider = _normalize_provider_name(req.provider)
 
     _log_request_event(
         "start",
@@ -424,9 +459,11 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
+        provider=normalized_provider,
     )
 
     try:
+        _ensure_supported_provider(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
@@ -441,6 +478,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             request_id,
             model=requested_model,
             preset=normalized_preset,
+            provider=normalized_provider,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -457,6 +495,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
+        provider=normalized_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -516,6 +555,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
+    normalized_provider = _normalize_provider_name(req.provider)
 
     _log_request_event(
         "start",
@@ -523,9 +563,11 @@ def generate_stream_api(req: ChatRequest, request: Request):
         request_id,
         model=requested_model,
         preset=normalized_preset,
+        provider=normalized_provider,
     )
 
     try:
+        _ensure_supported_provider(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         upstream_generator = generate_stream(
             prompt=shaped_prompt,
@@ -538,6 +580,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             request_id,
             model=requested_model,
             preset=normalized_preset,
+            provider=normalized_provider,
             outcome="failure",
             latency_ms=_latency_ms(start),
             error=str(e),
@@ -572,6 +615,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
                 request_id,
                 model=requested_model,
                 preset=normalized_preset,
+                provider=normalized_provider,
                 outcome=outcome,
                 latency_ms=_latency_ms(start),
                 error=error,
