@@ -44,8 +44,8 @@ OLLAMA_STREAM_READ_TIMEOUT = _get_timeout_env(
     "OLLAMA_STREAM_READ_TIMEOUT", OLLAMA_READ_TIMEOUT
 )
 
-REQUEST_TIMEOUT = (OLLAMA_CONNECT_TIMEOUT, OLLAMA_READ_TIMEOUT)
-STREAM_REQUEST_TIMEOUT = (OLLAMA_CONNECT_TIMEOUT, OLLAMA_STREAM_READ_TIMEOUT)
+OLLAMA_REQUEST_TIMEOUT = (OLLAMA_CONNECT_TIMEOUT, OLLAMA_READ_TIMEOUT)
+OLLAMA_STREAM_REQUEST_TIMEOUT = (OLLAMA_CONNECT_TIMEOUT, OLLAMA_STREAM_READ_TIMEOUT)
 
 RETRY_COUNT = int(os.environ.get("RETRY_COUNT", "2"))
 _thread_local = local()
@@ -89,7 +89,7 @@ def generate(prompt, model):
     for attempt in range(RETRY_COUNT + 1):
         try:
             r = _get_session().post(
-                f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=REQUEST_TIMEOUT
+                f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=OLLAMA_REQUEST_TIMEOUT
             )
             r.raise_for_status()
             data = _parse_json_object(r, "generate")
@@ -110,7 +110,7 @@ def generate(prompt, model):
 
 def list_models():
     try:
-        r = _get_session().get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
+        r = _get_session().get(f"{OLLAMA_BASE_URL}/api/tags", timeout=OLLAMA_REQUEST_TIMEOUT)
         r.raise_for_status()
         data = _parse_json_object(r, "list models")
         return [m["name"] for m in data.get("models", [])]
@@ -124,7 +124,7 @@ def list_models():
 
 def health_check():
     try:
-        r = _get_session().get(f"{OLLAMA_BASE_URL}/api/tags", timeout=REQUEST_TIMEOUT)
+        r = _get_session().get(f"{OLLAMA_BASE_URL}/api/tags", timeout=OLLAMA_REQUEST_TIMEOUT)
         r.raise_for_status()
         _parse_json_object(r, "health check")
     except requests.exceptions.RequestException as e:
@@ -140,7 +140,7 @@ def embedding(text, model="nomic-embed-text"):
             r = _get_session().post(
                 f"{OLLAMA_BASE_URL}/api/embeddings",
                 json=payload,
-                timeout=REQUEST_TIMEOUT,
+                timeout=OLLAMA_REQUEST_TIMEOUT,
             )
             r.raise_for_status()
             data = _parse_json_object(r, "embedding")
@@ -170,7 +170,7 @@ def generate_stream(prompt, model):
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json=payload,
                 stream=True,
-                timeout=STREAM_REQUEST_TIMEOUT,
+                timeout=OLLAMA_STREAM_REQUEST_TIMEOUT,
             )
             r.raise_for_status()
             return _iter_stream_lines(r)

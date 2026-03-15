@@ -13,7 +13,10 @@ from pydantic import BaseModel
 from logger import logger
 from ollama_client import (
     OLLAMA_BASE_URL,
-    REQUEST_TIMEOUT,
+    LEGACY_REQUEST_TIMEOUT,
+    OLLAMA_CONNECT_TIMEOUT,
+    OLLAMA_READ_TIMEOUT,
+    OLLAMA_STREAM_READ_TIMEOUT,
     RETRY_COUNT,
     UpstreamServiceError,
     embedding,
@@ -482,7 +485,10 @@ def config(request: Request, response: Response):
     return {
         "default_model": DEFAULT_MODEL,
         "ollama_configured": bool(OLLAMA_BASE_URL),
-        "request_timeout_s": REQUEST_TIMEOUT,
+        "request_timeout_s": LEGACY_REQUEST_TIMEOUT,
+        "ollama_connect_timeout_s": OLLAMA_CONNECT_TIMEOUT,
+        "ollama_read_timeout_s": OLLAMA_READ_TIMEOUT,
+        "ollama_stream_read_timeout_s": OLLAMA_STREAM_READ_TIMEOUT,
         "retry_count": RETRY_COUNT,
     }
 
