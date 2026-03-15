@@ -615,10 +615,12 @@ def generate_stream_api(req: ChatRequest, request: Request):
         error = None
 
         try:
-            yield from _normalize_upstream_stream_events(
+            stream_completed = yield from _normalize_upstream_stream_events(
                 upstream_generator,
                 request_id=request_id,
             )
+            if not stream_completed:
+                outcome = "incomplete"
         except Exception as e:
             outcome = "failure"
             error = str(e)
@@ -687,3 +689,5 @@ def _normalize_upstream_stream_events(upstream_generator, request_id: str | None
             "stream_done_missing request_id="
             f"{request_id} detail=upstream_ended_without_explicit_done"
         )
+
+    return done_emitted
