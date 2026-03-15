@@ -62,6 +62,26 @@ def test_config_echoes_incoming_request_id_and_logs(client, caplog):
     assert "phase=complete endpoint=/config request_id=config-req-1 outcome=success" in caplog.text
 
 
+def test_providers_echoes_incoming_request_id_and_logs(client, caplog):
+    caplog.set_level("INFO", logger="ai_gateway")
+
+    response = client.get("/providers", headers={"X-Request-Id": "providers-req-1"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-Id"] == "providers-req-1"
+    assert "phase=start endpoint=/providers request_id=providers-req-1" in caplog.text
+    assert "phase=complete endpoint=/providers request_id=providers-req-1 outcome=success" in caplog.text
+
+
+def test_providers_generates_fallback_request_id(client):
+    response = client.get("/providers")
+
+    assert response.status_code == 200
+    request_id = response.headers.get("X-Request-Id")
+    assert request_id is not None
+    assert len(request_id) == 12
+
+
 def test_chat_logs_normalized_preset_on_start_and_complete(client, monkeypatch, caplog):
     caplog.set_level("INFO", logger="ai_gateway")
     monkeypatch.setattr(app, "generate", lambda prompt, model: "ok")
