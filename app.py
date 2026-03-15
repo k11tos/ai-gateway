@@ -27,7 +27,7 @@ load_dotenv()
 
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
 DEFAULT_PROVIDER = "ollama"
-SUPPORTED_PROVIDERS = [DEFAULT_PROVIDER]
+SUPPORTED_PROVIDERS = (DEFAULT_PROVIDER,)
 
 
 def _load_model_aliases() -> dict[str, str]:
@@ -156,14 +156,15 @@ def _resolve_provider_for_request(provider: str | None) -> str:
 
     resolved_provider = provider.strip().lower()
 
-    if resolved_provider == DEFAULT_PROVIDER:
+    if resolved_provider in SUPPORTED_PROVIDERS:
         return resolved_provider
 
+    supported_providers = ", ".join(SUPPORTED_PROVIDERS)
     raise HTTPException(
         status_code=400,
         detail=(
             f"Unsupported provider '{provider}'. "
-            f"Supported providers: {DEFAULT_PROVIDER}"
+            f"Supported providers: {supported_providers}"
         ),
     )
 
@@ -453,7 +454,7 @@ def providers(request: Request, response: Response):
     )
 
     return {
-        "supported_providers": SUPPORTED_PROVIDERS,
+        "supported_providers": list(SUPPORTED_PROVIDERS),
         "default_provider": DEFAULT_PROVIDER,
     }
 

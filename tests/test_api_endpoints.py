@@ -453,6 +453,40 @@ def test_providers_endpoint_returns_discovery_payload(client):
     }
 
 
+def test_provider_validation_uses_supported_providers_source_of_truth(client, monkeypatch):
+    monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("ollama", "openai"))
+    monkeypatch.setattr(app, "DEFAULT_PROVIDER", "openai")
+
+    response = client.get("/providers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supported_providers": ["ollama", "openai"],
+        "default_provider": "openai",
+    }
+
+    calls = {}
+
+    def fake_generate(prompt, model):
+        calls["prompt"] = prompt
+        calls["model"] = model
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    accepted = client.post("/chat", json={"prompt": "hello", "provider": "OPENAI"})
+
+    assert accepted.status_code == 200
+    assert accepted.json()["provider"] == "openai"
+
+    rejected = client.post("/chat", json={"prompt": "hello", "provider": "anthropic"})
+
+    assert rejected.status_code == 400
+    assert rejected.json() == {
+        "detail": "Unsupported provider 'anthropic'. Supported providers: ollama, openai"
+    }
+
+
 def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch, caplog):
     monkeypatch.setenv("MODEL_ALIAS_FAST", "base-fast")
     monkeypatch.setenv(
