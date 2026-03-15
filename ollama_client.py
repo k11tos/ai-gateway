@@ -10,7 +10,43 @@ from logger import logger
 load_dotenv()
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://desktop.home:11434")
-REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "90"))
+
+
+def _get_timeout_env(name, default):
+    raw_value = os.environ.get(name)
+
+    if raw_value is None:
+        return default
+
+    try:
+        value = float(raw_value)
+    except ValueError:
+        logger.warning(
+            f"Invalid {name}={raw_value!r}; using fallback timeout of {default}s"
+        )
+        return default
+
+    if value <= 0:
+        logger.warning(f"Invalid {name}={raw_value!r}; timeout must be > 0")
+        return default
+
+    return value
+
+
+# Backward compatibility: REQUEST_TIMEOUT still works as the default for
+# connect/read when the newer Ollama-specific timeout variables are not set.
+LEGACY_REQUEST_TIMEOUT = _get_timeout_env("REQUEST_TIMEOUT", 90.0)
+OLLAMA_CONNECT_TIMEOUT = _get_timeout_env(
+    "OLLAMA_CONNECT_TIMEOUT", LEGACY_REQUEST_TIMEOUT
+)
+OLLAMA_READ_TIMEOUT = _get_timeout_env("OLLAMA_READ_TIMEOUT", LEGACY_REQUEST_TIMEOUT)
+OLLAMA_STREAM_READ_TIMEOUT = _get_timeout_env(
+    "OLLAMA_STREAM_READ_TIMEOUT", OLLAMA_READ_TIMEOUT
+)
+
+REQUEST_TIMEOUT = (OLLAMA_CONNECT_TIMEOUT, OLLAMA_READ_TIMEOUT)
+STREAM_REQUEST_TIMEOUT = (OLLAMA_CONNECT_TIMEOUT, OLLAMA_STREAM_READ_TIMEOUT)
+
 RETRY_COUNT = int(os.environ.get("RETRY_COUNT", "2"))
 _thread_local = local()
 
@@ -134,7 +170,7 @@ def generate_stream(prompt, model):
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json=payload,
                 stream=True,
-                timeout=REQUEST_TIMEOUT,
+                timeout=STREAM_REQUEST_TIMEOUT,
             )
             r.raise_for_status()
             return _iter_stream_lines(r)
