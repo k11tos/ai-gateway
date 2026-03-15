@@ -475,7 +475,10 @@ def test_presets_names_are_unique(client):
 def test_config_endpoint_returns_safe_runtime_summary(client, monkeypatch):
     monkeypatch.setattr(app, "DEFAULT_MODEL", "deepseek-r1:8b")
     monkeypatch.setattr(app, "OLLAMA_BASE_URL", "http://ollama.local:11434")
-    monkeypatch.setattr(app, "REQUEST_TIMEOUT", 42)
+    monkeypatch.setattr(app, "LEGACY_REQUEST_TIMEOUT", 42.0)
+    monkeypatch.setattr(app, "OLLAMA_CONNECT_TIMEOUT", 3.0)
+    monkeypatch.setattr(app, "OLLAMA_READ_TIMEOUT", 45.0)
+    monkeypatch.setattr(app, "OLLAMA_STREAM_READ_TIMEOUT", 120.0)
     monkeypatch.setattr(app, "RETRY_COUNT", 5)
 
     response = client.get("/config")
@@ -484,7 +487,10 @@ def test_config_endpoint_returns_safe_runtime_summary(client, monkeypatch):
     assert response.json() == {
         "default_model": "deepseek-r1:8b",
         "ollama_configured": True,
-        "request_timeout_s": 42,
+        "request_timeout_s": 42.0,
+        "ollama_connect_timeout_s": 3.0,
+        "ollama_read_timeout_s": 45.0,
+        "ollama_stream_read_timeout_s": 120.0,
         "retry_count": 5,
     }
 
