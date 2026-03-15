@@ -1,3 +1,4 @@
+import pytest
 import app
 
 
@@ -114,7 +115,7 @@ def test_generate_logs_normalized_preset_on_start_and_complete(client, monkeypat
     assert "preset=english" in caplog.text
 
 
-def test_generate_stream_logs_normalized_preset_on_start_and_complete(client, monkeypatch, caplog):
+def test_generate_stream_logs_success_outcome_on_complete(client, monkeypatch, caplog):
     caplog.set_level("INFO", logger="ai_gateway")
     monkeypatch.setattr(app, "generate_stream", lambda prompt, model: iter(['{"done":true}\n']))
 
@@ -127,4 +128,53 @@ def test_generate_stream_logs_normalized_preset_on_start_and_complete(client, mo
     assert response.status_code == 200
     assert "phase=start endpoint=/generate_stream request_id=stream-log-1 model=" in caplog.text
     assert "phase=complete endpoint=/generate_stream request_id=stream-log-1 model=" in caplog.text
+    assert "outcome=success" in caplog.text
     assert "preset=quant" in caplog.text
+
+
+def test_generate_stream_logs_incomplete_outcome_when_upstream_missing_done(client, monkeypatch, caplog):
+    caplog.set_level("INFO", logger="ai_gateway")
+    monkeypatch.setattr(
+        app,
+        "generate_stream",
+        lambda prompt, model: iter(['{"response":"partial"}\n']),
+    )
+
+    response = client.post(
+        "/generate_stream",
+        headers={"X-Request-Id": "stream-log-2"},
+        json={"prompt": "hello"},
+    )
+
+    assert response.status_code == 200
+    assert "stream_done_missing request_id=stream-log-2" in caplog.text
+    assert (
+        "phase=complete endpoint=/generate_stream request_id=stream-log-2 "
+        "model=deepseek-r1:8b provider=ollama outcome=incomplete"
+    ) in caplog.text
+
+
+def test_generate_stream_logs_failure_outcome_on_stream_exception(client, monkeypatch, caplog):
+    caplog.set_level("INFO", logger="ai_gateway")
+
+    def fail_after_chunk(prompt, model):
+        yield '{"response":"partial"}\n'
+        raise RuntimeError("stream boom")
+
+    monkeypatch.setattr(app, "generate_stream", fail_after_chunk)
+
+    with pytest.raises(Exception):
+        with client.stream(
+            "POST",
+            "/generate_stream",
+            headers={"X-Request-Id": "stream-log-3"},
+            json={"prompt": "hello"},
+        ) as response:
+            assert response.status_code == 200
+            list(response.iter_lines())
+
+    assert (
+        "phase=complete endpoint=/generate_stream request_id=stream-log-3 "
+        "model=deepseek-r1:8b provider=ollama outcome=failure"
+    ) in caplog.text
+    assert "error=stream boom" in caplog.text
