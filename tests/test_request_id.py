@@ -83,6 +83,20 @@ def test_providers_generates_fallback_request_id(client):
     assert len(request_id) == 12
 
 
+def test_version_echoes_incoming_request_id_and_logs(client, caplog):
+    caplog.set_level("INFO", logger="ai_gateway")
+
+    response = client.get("/version", headers={"X-Request-Id": "version-req-1"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-Id"] == "version-req-1"
+    assert "phase=start endpoint=/version request_id=version-req-1" in caplog.text
+    assert (
+        "phase=complete endpoint=/version request_id=version-req-1 outcome=success"
+        in caplog.text
+    )
+
+
 def test_chat_logs_normalized_preset_on_start_and_complete(client, monkeypatch, caplog):
     caplog.set_level("INFO", logger="ai_gateway")
     monkeypatch.setattr(app, "generate", lambda prompt, model: "ok")

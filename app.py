@@ -32,6 +32,8 @@ SUPPORTED_PROVIDERS = (DEFAULT_PROVIDER,)
 OUTCOME_SUCCESS = "success"
 OUTCOME_FAILURE = "failure"
 OUTCOME_INCOMPLETE = "incomplete"
+APP_VERSION_ENV_KEYS = ("APP_VERSION", "VERSION")
+COMMIT_SHA_ENV_KEYS = ("COMMIT_SHA", "GIT_SHA", "GITHUB_SHA")
 
 
 def _load_model_aliases() -> dict[str, str]:
@@ -209,6 +211,31 @@ def _latency_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
 
 
+def _first_non_empty_env(*keys: str) -> str | None:
+    for key in keys:
+        value = os.environ.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return None
+
+
+def _safe_version_summary() -> dict[str, str]:
+    app_version = _first_non_empty_env(*APP_VERSION_ENV_KEYS)
+    commit_sha = _first_non_empty_env(*COMMIT_SHA_ENV_KEYS)
+
+    summary = {
+        "app_version": app_version or "unavailable",
+        "commit_sha": commit_sha or "unavailable",
+    }
+    if app_version or commit_sha:
+        summary["status"] = "ok"
+    else:
+        summary["status"] = "version metadata unavailable"
+
+    return summary
+
+
 
 def _log_request_event(
     phase: str,
@@ -291,6 +318,26 @@ def health_ready(request: Request, response: Response):
 @app.get("/health")
 def health(request: Request, response: Response):
     return health_ready(request, response)
+
+
+@app.get("/version")
+def version(request: Request, response: Response):
+    start = time.perf_counter()
+    request_id = _request_id(request)
+
+    _log_request_event("start", "/version", request_id)
+
+    response.headers["X-Request-Id"] = request_id
+
+    _log_request_event(
+        "complete",
+        "/version",
+        request_id,
+        outcome=OUTCOME_SUCCESS,
+        latency_ms=_latency_ms(start),
+    )
+
+    return _safe_version_summary()
 
 
 @app.post("/chat")
