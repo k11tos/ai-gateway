@@ -33,6 +33,52 @@ def test_models_endpoint_returns_502_on_upstream_error(client, monkeypatch):
     assert response.json() == {"detail": "boom"}
 
 
+def test_version_endpoint_returns_safe_fallbacks_when_env_missing(client, monkeypatch):
+    monkeypatch.delenv("APP_VERSION", raising=False)
+    monkeypatch.delenv("VERSION", raising=False)
+    monkeypatch.delenv("COMMIT_SHA", raising=False)
+    monkeypatch.delenv("GIT_SHA", raising=False)
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
+    response = client.get("/version")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "app_version": "unavailable",
+        "commit_sha": "unavailable",
+        "status": "unavailable",
+    }
+
+
+
+
+def test_version_endpoint_truncates_full_commit_sha(client, monkeypatch):
+    monkeypatch.setenv("APP_VERSION", "1.2.3")
+    monkeypatch.setenv("COMMIT_SHA", "abc1234def5678")
+
+    response = client.get("/version")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "app_version": "1.2.3",
+        "commit_sha": "abc1234",
+        "status": "ok",
+    }
+
+def test_version_endpoint_returns_env_values_when_present(client, monkeypatch):
+    monkeypatch.setenv("APP_VERSION", "1.2.3")
+    monkeypatch.setenv("COMMIT_SHA", "abc1234")
+
+    response = client.get("/version")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "app_version": "1.2.3",
+        "commit_sha": "abc1234",
+        "status": "ok",
+    }
+
+
 def test_chat_uses_default_model_when_omitted(client, monkeypatch):
     calls = {}
 
