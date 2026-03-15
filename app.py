@@ -29,6 +29,10 @@ DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
 DEFAULT_PROVIDER = "ollama"
 SUPPORTED_PROVIDERS = (DEFAULT_PROVIDER,)
 
+OUTCOME_SUCCESS = "success"
+OUTCOME_FAILURE = "failure"
+OUTCOME_INCOMPLETE = "incomplete"
+
 
 def _load_model_aliases() -> dict[str, str]:
     aliases = {
@@ -234,7 +238,7 @@ def _log_request_event(
 
     message = " ".join(fields)
 
-    if outcome == "failure":
+    if outcome == OUTCOME_FAILURE:
         logger.error(message)
     else:
         logger.info(message)
@@ -262,7 +266,7 @@ def health_ready(request: Request, response: Response):
             "complete",
             "/health/ready",
             request_id,
-            outcome="failure",
+            outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
         )
@@ -328,7 +332,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             model=requested_model,
             preset=normalized_preset,
             provider=resolved_provider,
-            outcome="failure",
+            outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
         )
@@ -363,7 +367,7 @@ def models(request: Request, response: Response):
             "complete",
             "/models",
             request_id,
-            outcome="failure",
+            outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
         )
@@ -499,7 +503,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             model=requested_model,
             preset=normalized_preset,
             provider=resolved_provider,
-            outcome="failure",
+            outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
         )
@@ -541,7 +545,7 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
             "complete",
             "/embedding",
             request_id,
-            outcome="failure",
+            outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
         )
@@ -600,7 +604,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             model=requested_model,
             preset=normalized_preset,
             provider=resolved_provider,
-            outcome="failure",
+            outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
         )
@@ -611,7 +615,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
         ) from e
 
     def stream_with_completion_logging():
-        outcome = "success"
+        outcome = OUTCOME_SUCCESS
         error = None
 
         try:
@@ -620,13 +624,13 @@ def generate_stream_api(req: ChatRequest, request: Request):
                 request_id=request_id,
             )
             if not stream_completed:
-                outcome = "incomplete"
+                outcome = OUTCOME_INCOMPLETE
         except Exception as e:
-            outcome = "failure"
+            outcome = OUTCOME_FAILURE
             error = str(e)
             raise
         except BaseException as e:
-            outcome = "failure"
+            outcome = OUTCOME_FAILURE
             error = type(e).__name__
             raise
         finally:
