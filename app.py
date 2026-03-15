@@ -226,12 +226,12 @@ def _safe_version_summary() -> dict[str, str]:
 
     summary = {
         "app_version": app_version or "unavailable",
-        "commit_sha": commit_sha or "unavailable",
+        "commit_sha": (commit_sha[:7] if commit_sha else "unavailable"),
     }
     if app_version or commit_sha:
         summary["status"] = "ok"
     else:
-        summary["status"] = "version metadata unavailable"
+        summary["status"] = "unavailable"
 
     return summary
 
