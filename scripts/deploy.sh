@@ -9,6 +9,7 @@ STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 HEALTHCHECK_TIMEOUT_SECONDS="${HEALTHCHECK_TIMEOUT_SECONDS:-30}"
 HEALTHCHECK_INTERVAL_SECONDS="${HEALTHCHECK_INTERVAL_SECONDS:-1}"
 LAST_DEPLOY_FILE=".last_deploy_commit"
+RUNTIME_ENV_FILE_NAME=".deploy-runtime.env"
 
 APP_DIR="${APP_DIR/#\~/$HOME}"
 
@@ -66,7 +67,32 @@ if [[ "${deployed_commit}" != "${remote_commit}" ]]; then
   exit 1
 fi
 
-new_commit="$(git rev-parse HEAD)"
+runtime_app_version="${APP_VERSION:-${BRANCH}-$(git rev-parse --short=12 HEAD)}"
+runtime_commit_sha="${COMMIT_SHA:-${deployed_commit}}"
+
+runtime_env_file="${APP_DIR}/${RUNTIME_ENV_FILE_NAME}"
+runtime_env_tmp="${runtime_env_file}.tmp"
+
+log "Writing runtime metadata to ${runtime_env_file}"
+{
+  printf 'APP_VERSION=%s\n' "${runtime_app_version}"
+  printf 'COMMIT_SHA=%s\n' "${runtime_commit_sha}"
+} > "${runtime_env_tmp}"
+mv "${runtime_env_tmp}" "${runtime_env_file}"
+
+systemd_dropin_dir="/etc/systemd/system/${SERVICE_NAME}.service.d"
+systemd_dropin_file="${systemd_dropin_dir}/override.conf"
+log "Ensuring systemd service ${SERVICE_NAME} reads ${runtime_env_file}"
+sudo mkdir -p "${systemd_dropin_dir}"
+sudo tee "${systemd_dropin_file}" >/dev/null <<EOD
+[Service]
+EnvironmentFile=${runtime_env_file}
+EOD
+
+new_commit="${deployed_commit}"
+log "Reloading systemd daemon"
+sudo systemctl daemon-reload
+
 log "Restarting systemd service: ${SERVICE_NAME}"
 sudo systemctl restart "${SERVICE_NAME}"
 
