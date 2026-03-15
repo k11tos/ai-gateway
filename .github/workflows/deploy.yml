@@ -70,9 +70,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          full_sha="$(git rev-parse HEAD)"
-          short_sha="$(git rev-parse --short=12 HEAD)"
           branch_name="${{ inputs.branch }}"
+          git fetch --no-tags --depth=1 origin "${branch_name}"
+
+          full_sha="$(git rev-parse "origin/${branch_name}")"
+          short_sha="${full_sha:0:12}"
           app_version="${branch_name}-${short_sha}"
 
           echo "full_sha=${full_sha}" >> "${GITHUB_OUTPUT}"

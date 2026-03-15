@@ -81,7 +81,7 @@ log "Writing runtime metadata to ${runtime_env_file}"
 mv "${runtime_env_tmp}" "${runtime_env_file}"
 
 systemd_dropin_dir="/etc/systemd/system/${SERVICE_NAME}.service.d"
-systemd_dropin_file="${systemd_dropin_dir}/override.conf"
+systemd_dropin_file="${systemd_dropin_dir}/10-deploy-runtime-env.conf"
 log "Ensuring systemd service ${SERVICE_NAME} reads ${runtime_env_file}"
 sudo mkdir -p "${systemd_dropin_dir}"
 sudo tee "${systemd_dropin_file}" >/dev/null <<EOD
