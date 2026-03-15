@@ -65,6 +65,22 @@ jobs:
           chmod 600 ~/.ssh/pi_key
           ssh-keyscan -p "${port}" -H "${PI_HOST}" >> ~/.ssh/known_hosts
 
+      - name: Compute deploy version metadata
+        id: version_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch_name="${{ inputs.branch }}"
+          git fetch --no-tags --depth=1 origin "${branch_name}"
+
+          full_sha="$(git rev-parse "origin/${branch_name}")"
+          short_sha="${full_sha:0:12}"
+          app_version="${branch_name}-${short_sha}"
+
+          echo "full_sha=${full_sha}" >> "${GITHUB_OUTPUT}"
+          echo "short_sha=${short_sha}" >> "${GITHUB_OUTPUT}"
+          echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
+
       - name: Run deploy script on Raspberry Pi
         shell: bash
         run: |
@@ -81,9 +97,11 @@ jobs:
           fi
 
           ssh -i ~/.ssh/pi_key -p "${port}" "${PI_USER}@${PI_HOST}" \
-            "APP_DIR='${app_dir}' \
-             SERVICE_NAME='${{ inputs.service_name }}' \
-             HEALTH_URL='${{ inputs.health_url }}' \
-             BRANCH='${{ inputs.branch }}' \
-             STARTUP_WAIT_SECONDS='${{ inputs.startup_wait_seconds }}' \
+            "APP_DIR=$(printf %q "${app_dir}") \
+             SERVICE_NAME=$(printf %q "${{ inputs.service_name }}") \
+             HEALTH_URL=$(printf %q "${{ inputs.health_url }}") \
+             BRANCH=$(printf %q "${{ inputs.branch }}") \
+             STARTUP_WAIT_SECONDS=$(printf %q "${{ inputs.startup_wait_seconds }}") \
+             APP_VERSION=$(printf %q "${{ steps.version_meta.outputs.app_version }}") \
+             COMMIT_SHA=$(printf %q "${{ steps.version_meta.outputs.full_sha }}") \
              bash -s" < scripts/deploy.sh
