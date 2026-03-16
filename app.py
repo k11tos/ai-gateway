@@ -459,7 +459,11 @@ def presets(request: Request, response: Response):
 
     return {
         "presets": [
-            {"name": preset["name"], "description": preset["description"]}
+            {
+                "name": preset["name"],
+                "description": preset["description"],
+                "prompt_prefix": preset["prompt_prefix"],
+            }
             for preset in PRESET_DEFINITIONS
         ]
     }
