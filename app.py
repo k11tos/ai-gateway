@@ -37,6 +37,14 @@ OUTCOME_FAILURE = "failure"
 OUTCOME_INCOMPLETE = "incomplete"
 APP_VERSION_ENV_KEYS = ("APP_VERSION", "VERSION")
 COMMIT_SHA_ENV_KEYS = ("COMMIT_SHA", "GIT_SHA", "GITHUB_SHA")
+METRIC_KEYS = (
+    "requests_total",
+    "chat_requests",
+    "stream_requests",
+    "embedding_requests",
+    "errors_total",
+)
+METRICS = {key: 0 for key in METRIC_KEYS}
 
 
 def _load_model_aliases() -> dict[str, str]:
@@ -239,6 +247,19 @@ def _safe_version_summary() -> dict[str, str]:
     return summary
 
 
+def _increment_metric(metric_key: str) -> None:
+    METRICS[metric_key] += 1
+
+
+def _metrics_snapshot() -> dict[str, int]:
+    return {key: METRICS[key] for key in METRIC_KEYS}
+
+
+def _reset_metrics() -> None:
+    for key in METRIC_KEYS:
+        METRICS[key] = 0
+
+
 
 def _log_request_event(
     phase: str,
@@ -343,6 +364,11 @@ def version(request: Request, response: Response):
     return _safe_version_summary()
 
 
+@app.get("/metrics")
+def metrics():
+    return _metrics_snapshot()
+
+
 @app.post("/chat")
 def chat(req: ChatRequest, request: Request, response: Response):
     start = time.perf_counter()
@@ -354,7 +380,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    resolved_provider = _resolve_provider_for_request(req.provider)
+    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
         "start",
@@ -362,10 +388,13 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=resolved_provider,
+        provider=observed_provider,
     )
+    _increment_metric("requests_total")
+    _increment_metric("chat_requests")
 
     try:
+        resolved_provider = _resolve_provider_for_request(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
@@ -375,13 +404,14 @@ def chat(req: ChatRequest, request: Request, response: Response):
             request_id=request_id,
         )
     except HTTPException as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/chat",
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=resolved_provider,
+            provider=observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -395,7 +425,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=resolved_provider,
+        provider=observed_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -594,10 +624,13 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
     request_id = _request_id(request)
 
     _log_request_event("start", "/embedding", request_id)
+    _increment_metric("requests_total")
+    _increment_metric("embedding_requests")
 
     try:
         vector = embedding(req.text)
     except UpstreamServiceError as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/embedding",
@@ -636,7 +669,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    resolved_provider = _resolve_provider_for_request(req.provider)
+    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
         "start",
@@ -644,23 +677,41 @@ def generate_stream_api(req: ChatRequest, request: Request):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=resolved_provider,
+        provider=observed_provider,
     )
+    _increment_metric("requests_total")
+    _increment_metric("stream_requests")
 
     try:
+        resolved_provider = _resolve_provider_for_request(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         upstream_generator = generate_stream(
             prompt=shaped_prompt,
             model=resolved_model,
         )
-    except UpstreamServiceError as e:
+    except HTTPException as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/generate_stream",
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=resolved_provider,
+            provider=observed_provider,
+            outcome=OUTCOME_FAILURE,
+            latency_ms=_latency_ms(start),
+            error=str(e.detail),
+        )
+        raise
+    except UpstreamServiceError as e:
+        _increment_metric("errors_total")
+        _log_request_event(
+            "complete",
+            "/generate_stream",
+            request_id,
+            model=requested_model,
+            preset=normalized_preset,
+            provider=observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
@@ -691,13 +742,15 @@ def generate_stream_api(req: ChatRequest, request: Request):
             error = type(e).__name__
             raise
         finally:
+            if outcome == OUTCOME_FAILURE:
+                _increment_metric("errors_total")
             _log_request_event(
                 "complete",
                 "/generate_stream",
                 request_id,
                 model=requested_model,
                 preset=normalized_preset,
-                provider=resolved_provider,
+                provider=observed_provider,
                 outcome=outcome,
                 latency_ms=_latency_ms(start),
                 error=error,
