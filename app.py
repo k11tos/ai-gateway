@@ -380,7 +380,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    resolved_provider = _resolve_provider_for_request(req.provider)
+    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else None
 
     _log_request_event(
         "start",
@@ -388,12 +388,13 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=resolved_provider,
+        provider=observed_provider,
     )
     _increment_metric("requests_total")
     _increment_metric("chat_requests")
 
     try:
+        resolved_provider = _resolve_provider_for_request(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
@@ -410,7 +411,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=resolved_provider,
+            provider=observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -668,7 +669,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    resolved_provider = _resolve_provider_for_request(req.provider)
+    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else None
 
     _log_request_event(
         "start",
@@ -676,12 +677,13 @@ def generate_stream_api(req: ChatRequest, request: Request):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=resolved_provider,
+        provider=observed_provider,
     )
     _increment_metric("requests_total")
     _increment_metric("stream_requests")
 
     try:
+        resolved_provider = _resolve_provider_for_request(req.provider)
         shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
         upstream_generator = generate_stream(
             prompt=shaped_prompt,
@@ -695,7 +697,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=resolved_provider,
+            provider=observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -709,7 +711,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             request_id,
             model=requested_model,
             preset=normalized_preset,
-            provider=resolved_provider,
+            provider=observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
