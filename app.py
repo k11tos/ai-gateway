@@ -380,7 +380,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else None
+    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
         "start",
@@ -425,7 +425,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=requested_model,
         preset=normalized_preset,
-        provider=resolved_provider,
+        provider=observed_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -669,7 +669,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
     )
 
     normalized_preset = _normalize_preset_name(req.preset)
-    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else None
+    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
         "start",
@@ -750,7 +750,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
                 request_id,
                 model=requested_model,
                 preset=normalized_preset,
-                provider=resolved_provider,
+                provider=observed_provider,
                 outcome=outcome,
                 latency_ms=_latency_ms(start),
                 error=error,
