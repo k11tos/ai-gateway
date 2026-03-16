@@ -438,7 +438,7 @@ def test_presets_endpoint_returns_static_presets(client):
     assert response.headers["X-Request-Id"] == "preset-req-1"
     assert response.json() == {
         "presets": [
-            {"name": p["name"], "description": p["description"]}
+            {"name": p["name"], "description": p["description"], "prompt_prefix": p["prompt_prefix"]}
             for p in app.PRESET_DEFINITIONS
         ]
     }
@@ -458,9 +458,10 @@ def test_presets_response_contract_shape_and_order(client):
     assert preset_names == expected_names_in_order
 
     for preset in payload["presets"]:
-        assert set(preset.keys()) == {"name", "description"}
+        assert set(preset.keys()) == {"name", "description", "prompt_prefix"}
         assert isinstance(preset["name"], str)
         assert isinstance(preset["description"], str)
+        assert isinstance(preset["prompt_prefix"], str)
 
 
 def test_presets_names_are_unique(client):
