@@ -566,3 +566,67 @@ def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch,
         "model_alias_config_invalid_empty_alias pair==missing-alias" in message
         for message in messages
     )
+
+
+def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "collect_local_server_status",
+        lambda: {
+            "gateway": "ok",
+            "disk_percent": 71.2,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.20, 0.18],
+        },
+    )
+
+    response = client.post("/agent/brain")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "overall_status": "ok",
+        "summary": {
+            "gateway": "ok",
+            "disk_percent": 71.2,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.2, 0.18],
+        },
+        "message_lines": [
+            "ai-gateway ok",
+            "disk usage 71.2%",
+            "memory usage 53.4%",
+        ],
+    }
+
+
+def test_agent_brain_returns_partial_when_any_metric_is_missing(client, monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "collect_local_server_status",
+        lambda: {
+            "gateway": "ok",
+            "disk_percent": None,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.20, 0.18],
+        },
+    )
+
+    response = client.post("/agent/brain")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "overall_status": "partial",
+        "summary": {
+            "gateway": "ok",
+            "disk_percent": None,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.2, 0.18],
+        },
+        "message_lines": [
+            "ai-gateway ok",
+            "disk usage unavailable",
+            "memory usage 53.4%",
+        ],
+    }
