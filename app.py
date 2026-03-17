@@ -2,6 +2,7 @@ import json
 import os
 import time
 import uuid
+from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -120,6 +121,20 @@ class ChatRequest(BaseModel):
     model: str | None = None
     preset: str | None = None
     provider: str | None = None
+
+
+class AgentBrainSummary(BaseModel):
+    gateway: str
+    disk_percent: float | None = None
+    memory_percent: float | None = None
+    load_average: list[float] | None = None
+
+
+class AgentBrainResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    overall_status: Literal["ok", "partial", "warning"]
+    summary: AgentBrainSummary
+    message_lines: list[str]
 
 
 def _normalize_preset_name(preset: str | None) -> str | None:
