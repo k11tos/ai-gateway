@@ -162,6 +162,12 @@ def _agent_brain_message_lines(summary: AgentBrainSummary) -> list[str]:
     else:
         lines.append(f"memory usage {summary.memory_percent:.1f}%")
 
+    if summary.load_average is None:
+        lines.append("load average unavailable")
+    else:
+        rendered = ", ".join(f"{value:.2f}" for value in summary.load_average)
+        lines.append(f"load average {rendered}")
+
     return lines
 
 

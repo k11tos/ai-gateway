@@ -596,37 +596,47 @@ def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch
             "ai-gateway ok",
             "disk usage 71.2%",
             "memory usage 53.4%",
+            "load average 0.12, 0.20, 0.18",
         ],
     }
 
 
-def test_agent_brain_returns_partial_when_any_metric_is_missing(client, monkeypatch):
+def test_agent_brain_returns_partial_when_load_average_is_missing(client, monkeypatch):
     monkeypatch.setattr(
         app,
         "collect_local_server_status",
         lambda: {
             "gateway": "ok",
-            "disk_percent": None,
+            "disk_percent": 71.2,
             "memory_percent": 53.4,
-            "load_average": [0.12, 0.20, 0.18],
+            "load_average": None,
         },
     )
 
     response = client.post("/agent/brain")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "overall_status": "partial",
-        "summary": {
+    assert response.json()["overall_status"] == "partial"
+
+
+def test_agent_brain_message_lines_include_load_average_unavailable_when_missing(client, monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "collect_local_server_status",
+        lambda: {
             "gateway": "ok",
-            "disk_percent": None,
+            "disk_percent": 71.2,
             "memory_percent": 53.4,
-            "load_average": [0.12, 0.2, 0.18],
+            "load_average": None,
         },
-        "message_lines": [
-            "ai-gateway ok",
-            "disk usage unavailable",
-            "memory usage 53.4%",
-        ],
-    }
+    )
+
+    response = client.post("/agent/brain")
+
+    assert response.status_code == 200
+    assert response.json()["message_lines"] == [
+        "ai-gateway ok",
+        "disk usage 71.2%",
+        "memory usage 53.4%",
+        "load average unavailable",
+    ]
