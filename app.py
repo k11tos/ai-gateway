@@ -10,6 +10,7 @@ from fastapi import Request
 from fastapi import Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_status_service import collect_local_server_status
 
 from logger import logger
@@ -136,39 +137,6 @@ class AgentBrainResponse(BaseModel):
     overall_status: Literal["ok", "partial", "warning"]
     summary: AgentBrainSummary
     message_lines: list[str]
-
-
-def _agent_brain_overall_status(summary: AgentBrainSummary) -> Literal["ok", "partial"]:
-    if (
-        summary.disk_percent is None
-        or summary.memory_percent is None
-        or summary.load_average is None
-    ):
-        return "partial"
-
-    return "ok"
-
-
-def _agent_brain_message_lines(summary: AgentBrainSummary) -> list[str]:
-    lines = [f"ai-gateway {summary.gateway}"]
-
-    if summary.disk_percent is None:
-        lines.append("disk usage unavailable")
-    else:
-        lines.append(f"disk usage {summary.disk_percent:.1f}%")
-
-    if summary.memory_percent is None:
-        lines.append("memory usage unavailable")
-    else:
-        lines.append(f"memory usage {summary.memory_percent:.1f}%")
-
-    if summary.load_average is None:
-        lines.append("load average unavailable")
-    else:
-        rendered = ", ".join(f"{value:.2f}" for value in summary.load_average)
-        lines.append(f"load average {rendered}")
-
-    return lines
 
 
 def _normalize_preset_name(preset: str | None) -> str | None:
@@ -677,7 +645,7 @@ def agent_brain(request: Request, response: Response):
         memory_percent=raw_status["memory_percent"],
         load_average=raw_status["load_average"],
     )
-    overall_status = _agent_brain_overall_status(summary)
+    presentation = format_agent_brain_summary(summary)
 
     response.headers["X-Request-Id"] = request_id
     _log_request_event(
@@ -689,9 +657,9 @@ def agent_brain(request: Request, response: Response):
     )
 
     return AgentBrainResponse(
-        overall_status=overall_status,
+        overall_status=presentation['overall_status'],
         summary=summary,
-        message_lines=_agent_brain_message_lines(summary),
+        message_lines=presentation['message_lines'],
     )
 
 
