@@ -568,11 +568,28 @@ def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch,
     )
 
 
+def _mock_agent_brain_metrics(monkeypatch, status):
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: status)
+
+
+def _assert_agent_brain_response(response, *, expected_status, expected_summary, expected_lines):
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert set(payload) == {"status", "overall_status", "summary", "message_lines"}
+    assert payload["status"] == "ok"
+    assert payload["overall_status"] == expected_status
+    assert payload["summary"] == expected_summary
+    assert isinstance(payload["message_lines"], list)
+    assert payload["message_lines"]
+    assert payload["message_lines"] == expected_lines
+
+
 def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "collect_local_server_status",
-        lambda: {
+    _mock_agent_brain_metrics(
+        monkeypatch,
+        {
             "gateway": "ok",
             "disk_percent": 71.2,
             "memory_percent": 53.4,
@@ -582,31 +599,29 @@ def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch
 
     response = client.post("/agent/brain")
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "overall_status": "ok",
-        "summary": {
+    _assert_agent_brain_response(
+        response,
+        expected_status="ok",
+        expected_summary={
             "gateway": "ok",
             "disk_percent": 71.2,
             "memory_percent": 53.4,
             "load_average": [0.12, 0.2, 0.18],
         },
-        "message_lines": [
+        expected_lines=[
             "ai-gateway 정상",
             "디스크 사용률 71.2%입니다.",
             "메모리 사용률 53.4%입니다.",
             "로드 평균 0.12, 0.20, 0.18입니다.",
             "현재 즉시 대응이 필요한 징후는 없습니다.",
         ],
-    }
+    )
 
 
-def test_agent_brain_returns_partial_when_disk_percent_is_missing(client, monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "collect_local_server_status",
-        lambda: {
+def test_agent_brain_returns_partial_when_one_metric_is_missing(client, monkeypatch):
+    _mock_agent_brain_metrics(
+        monkeypatch,
+        {
             "gateway": "ok",
             "disk_percent": None,
             "memory_percent": 53.4,
@@ -616,88 +631,52 @@ def test_agent_brain_returns_partial_when_disk_percent_is_missing(client, monkey
 
     response = client.post("/agent/brain")
 
-    assert response.status_code == 200
-    assert response.json()["overall_status"] == "partial"
-    assert response.json()["message_lines"] == [
-        "ai-gateway 일부 지표 확인 필요",
-        "디스크 사용률을 확인할 수 없습니다.",
-        "메모리 사용률 53.4%입니다.",
-        "로드 평균 0.12, 0.20, 0.18입니다.",
-        "일부 지표가 없어 추가 확인이 필요합니다.",
-    ]
+    _assert_agent_brain_response(
+        response,
+        expected_status="partial",
+        expected_summary={
+            "gateway": "ok",
+            "disk_percent": None,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.2, 0.18],
+        },
+        expected_lines=[
+            "ai-gateway 일부 지표 확인 필요",
+            "디스크 사용률을 확인할 수 없습니다.",
+            "메모리 사용률 53.4%입니다.",
+            "로드 평균 0.12, 0.20, 0.18입니다.",
+            "일부 지표가 없어 추가 확인이 필요합니다.",
+        ],
+    )
 
 
-def test_agent_brain_returns_partial_when_memory_percent_is_missing(client, monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "collect_local_server_status",
-        lambda: {
+def test_agent_brain_returns_warning_when_memory_percent_is_high(client, monkeypatch):
+    _mock_agent_brain_metrics(
+        monkeypatch,
+        {
             "gateway": "ok",
             "disk_percent": 71.2,
-            "memory_percent": None,
+            "memory_percent": 90.0,
             "load_average": [0.12, 0.20, 0.18],
         },
     )
 
     response = client.post("/agent/brain")
 
-    assert response.status_code == 200
-    assert response.json()["overall_status"] == "partial"
-    assert response.json()["message_lines"] == [
-        "ai-gateway 일부 지표 확인 필요",
-        "디스크 사용률 71.2%입니다.",
-        "메모리 사용률을 확인할 수 없습니다.",
-        "로드 평균 0.12, 0.20, 0.18입니다.",
-        "일부 지표가 없어 추가 확인이 필요합니다.",
-    ]
-
-
-def test_agent_brain_returns_partial_when_load_average_is_missing(client, monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "collect_local_server_status",
-        lambda: {
+    _assert_agent_brain_response(
+        response,
+        expected_status="warning",
+        expected_summary={
             "gateway": "ok",
             "disk_percent": 71.2,
-            "memory_percent": 53.4,
-            "load_average": None,
+            "memory_percent": 90.0,
+            "load_average": [0.12, 0.2, 0.18],
         },
+        expected_lines=[
+            "ai-gateway 주의",
+            "디스크 사용률 71.2%입니다.",
+            "메모리 사용률 90.0%로 높습니다.",
+            "로드 평균 0.12, 0.20, 0.18입니다.",
+            "자원 사용률이 높아 즉시 점검이 필요합니다.",
+        ],
     )
-
-    response = client.post("/agent/brain")
-
-    assert response.status_code == 200
-    assert response.json()["overall_status"] == "partial"
-    assert response.json()["message_lines"] == [
-        "ai-gateway 일부 지표 확인 필요",
-        "디스크 사용률 71.2%입니다.",
-        "메모리 사용률 53.4%입니다.",
-        "로드 평균을 확인할 수 없습니다.",
-        "일부 지표가 없어 추가 확인이 필요합니다.",
-    ]
-
-
-
-def test_agent_brain_returns_warning_when_disk_percent_is_high(client, monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "collect_local_server_status",
-        lambda: {
-            "gateway": "ok",
-            "disk_percent": 91.2,
-            "memory_percent": 53.4,
-            "load_average": [0.12, 0.20, 0.18],
-        },
-    )
-
-    response = client.post("/agent/brain")
-
-    assert response.status_code == 200
-    assert response.json()["overall_status"] == "warning"
-    assert response.json()["message_lines"] == [
-        "ai-gateway 주의",
-        "디스크 사용률 91.2%로 높습니다.",
-        "메모리 사용률 53.4%입니다.",
-        "로드 평균 0.12, 0.20, 0.18입니다.",
-        "자원 사용률이 높아 즉시 점검이 필요합니다.",
-    ]
