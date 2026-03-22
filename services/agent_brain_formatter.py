@@ -31,6 +31,10 @@ def format_agent_brain_summary(
 def _overall_status(
     summary: AgentBrainSummaryLike,
 ) -> Literal['ok', 'partial', 'warning']:
+    # Keep this rule order aligned with the endpoint requirement:
+    # 1) warning when disk or memory is >= 90
+    # 2) partial when any metric is missing
+    # 3) otherwise ok
     if _is_warning(summary):
         return 'warning'
 

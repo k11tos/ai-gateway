@@ -54,3 +54,23 @@ def test_format_agent_brain_summary_returns_warning_when_usage_is_high():
     assert presentation['message_lines'][0] == 'ai-gateway 주의'
     assert presentation['message_lines'][2] == '메모리 사용률 90.0%로 높습니다.'
     assert presentation['message_lines'][-1] == '자원 사용률이 높아 즉시 점검이 필요합니다.'
+
+
+def test_format_agent_brain_summary_keeps_warning_precedence_over_missing_metrics():
+    summary = SimpleNamespace(
+        gateway='ok',
+        disk_percent=95.0,
+        memory_percent=None,
+        load_average=[0.12, 0.20, 0.18],
+    )
+
+    presentation = format_agent_brain_summary(summary)
+
+    assert presentation['overall_status'] == 'warning'
+    assert presentation['message_lines'] == [
+        'ai-gateway 주의',
+        '디스크 사용률 95.0%로 높습니다.',
+        '메모리 사용률을 확인할 수 없습니다.',
+        '로드 평균 0.12, 0.20, 0.18입니다.',
+        '자원 사용률이 높아 즉시 점검이 필요합니다.',
+    ]
