@@ -593,10 +593,11 @@ def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch
             "load_average": [0.12, 0.2, 0.18],
         },
         "message_lines": [
-            "ai-gateway ok",
-            "disk usage 71.2%",
-            "memory usage 53.4%",
-            "load average 0.12, 0.20, 0.18",
+            "ai-gateway 정상",
+            "디스크 사용률 71.2%입니다.",
+            "메모리 사용률 53.4%입니다.",
+            "로드 평균 0.12, 0.20, 0.18입니다.",
+            "현재 즉시 대응이 필요한 징후는 없습니다.",
         ],
     }
 
@@ -618,10 +619,11 @@ def test_agent_brain_returns_partial_when_disk_percent_is_missing(client, monkey
     assert response.status_code == 200
     assert response.json()["overall_status"] == "partial"
     assert response.json()["message_lines"] == [
-        "ai-gateway ok",
-        "disk usage unavailable",
-        "memory usage 53.4%",
-        "load average 0.12, 0.20, 0.18",
+        "ai-gateway 일부 지표 확인 필요",
+        "디스크 사용률을 확인할 수 없습니다.",
+        "메모리 사용률 53.4%입니다.",
+        "로드 평균 0.12, 0.20, 0.18입니다.",
+        "일부 지표가 없어 추가 확인이 필요합니다.",
     ]
 
 
@@ -642,10 +644,11 @@ def test_agent_brain_returns_partial_when_memory_percent_is_missing(client, monk
     assert response.status_code == 200
     assert response.json()["overall_status"] == "partial"
     assert response.json()["message_lines"] == [
-        "ai-gateway ok",
-        "disk usage 71.2%",
-        "memory usage unavailable",
-        "load average 0.12, 0.20, 0.18",
+        "ai-gateway 일부 지표 확인 필요",
+        "디스크 사용률 71.2%입니다.",
+        "메모리 사용률을 확인할 수 없습니다.",
+        "로드 평균 0.12, 0.20, 0.18입니다.",
+        "일부 지표가 없어 추가 확인이 필요합니다.",
     ]
 
 
@@ -666,9 +669,35 @@ def test_agent_brain_returns_partial_when_load_average_is_missing(client, monkey
     assert response.status_code == 200
     assert response.json()["overall_status"] == "partial"
     assert response.json()["message_lines"] == [
-        "ai-gateway ok",
-        "disk usage 71.2%",
-        "memory usage 53.4%",
-        "load average unavailable",
+        "ai-gateway 일부 지표 확인 필요",
+        "디스크 사용률 71.2%입니다.",
+        "메모리 사용률 53.4%입니다.",
+        "로드 평균을 확인할 수 없습니다.",
+        "일부 지표가 없어 추가 확인이 필요합니다.",
     ]
 
+
+
+def test_agent_brain_returns_warning_when_disk_percent_is_high(client, monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "collect_local_server_status",
+        lambda: {
+            "gateway": "ok",
+            "disk_percent": 91.2,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.20, 0.18],
+        },
+    )
+
+    response = client.post("/agent/brain")
+
+    assert response.status_code == 200
+    assert response.json()["overall_status"] == "warning"
+    assert response.json()["message_lines"] == [
+        "ai-gateway 주의",
+        "디스크 사용률 91.2%로 높습니다.",
+        "메모리 사용률 53.4%입니다.",
+        "로드 평균 0.12, 0.20, 0.18입니다.",
+        "자원 사용률이 높아 즉시 점검이 필요합니다.",
+    ]
