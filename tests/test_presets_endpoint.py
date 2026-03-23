@@ -1,4 +1,4 @@
-import app
+from services import presets
 
 
 def test_presets_endpoint_json_structure(client):
@@ -28,7 +28,7 @@ def test_presets_endpoint_includes_prompt_prefix(client):
                 "description": preset["description"],
                 "prompt_prefix": preset["prompt_prefix"],
             }
-            for preset in app.PRESET_DEFINITIONS
+            for preset in presets.PRESET_DEFINITIONS
         ]
     }
 
