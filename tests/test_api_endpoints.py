@@ -1,4 +1,5 @@
 import app
+from services import presets
 from ollama_client import UpstreamServiceError
 
 
@@ -183,7 +184,7 @@ def test_chat_applies_coder_preset(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {
-        "prompt": app.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello",
+        "prompt": presets.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello",
         "model": app.DEFAULT_MODEL,
     }
 
@@ -202,7 +203,7 @@ def test_chat_accepts_normalized_preset_input(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {
-        "prompt": app.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello",
+        "prompt": presets.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello",
         "model": app.DEFAULT_MODEL,
     }
 
@@ -213,13 +214,13 @@ def test_apply_prompt_preset_uses_same_source_as_presets_endpoint(client):
     assert response.status_code == 200
 
     endpoint_names = [preset["name"] for preset in response.json()["presets"]]
-    shared_names = [preset["name"] for preset in app.PRESET_DEFINITIONS]
+    shared_names = [preset["name"] for preset in presets.PRESET_DEFINITIONS]
 
     assert endpoint_names == shared_names
 
     for preset_name in endpoint_names:
-        expected = app.PRESET_BY_NAME[preset_name]["prompt_prefix"] + "probe"
-        assert app._apply_prompt_preset("probe", preset_name) == expected
+        expected = presets.PRESET_BY_NAME[preset_name]["prompt_prefix"] + "probe"
+        assert presets.apply_prompt_preset("probe", preset_name) == expected
 
 
 def test_chat_rejects_unknown_preset(client):
@@ -303,7 +304,7 @@ def test_generate_applies_english_preset(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == {
-        "prompt": app.PRESET_BY_NAME["english"]["prompt_prefix"] + "hi",
+        "prompt": presets.PRESET_BY_NAME["english"]["prompt_prefix"] + "hi",
         "model": app.DEFAULT_MODEL,
     }
 
@@ -392,7 +393,7 @@ def test_generate_stream_applies_quant_preset(client, monkeypatch):
 
     assert response.status_code == 200
     assert seen == {
-        "prompt": app.PRESET_BY_NAME["quant"]["prompt_prefix"] + "solve",
+        "prompt": presets.PRESET_BY_NAME["quant"]["prompt_prefix"] + "solve",
         "model": app.DEFAULT_MODEL,
     }
 
@@ -439,7 +440,7 @@ def test_presets_endpoint_returns_static_presets(client):
     assert response.json() == {
         "presets": [
             {"name": p["name"], "description": p["description"], "prompt_prefix": p["prompt_prefix"]}
-            for p in app.PRESET_DEFINITIONS
+            for p in presets.PRESET_DEFINITIONS
         ]
     }
 

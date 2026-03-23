@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_status_service import collect_local_server_status
+from services import presets as preset_service
 
 from logger import logger
 from ollama_client import (
@@ -89,31 +90,6 @@ def _load_model_aliases() -> dict[str, str]:
 
 
 MODEL_ALIASES = _load_model_aliases()
-# Client-facing API contract for /presets. Keep names, descriptions, and order stable
-# unless intentionally coordinating changes with downstream clients.
-PRESET_DEFINITIONS = (
-    {
-        "name": "normal",
-        "description": "Balanced assistant for general use.",
-        "prompt_prefix": "",
-    },
-    {
-        "name": "coder",
-        "description": "Focused on programming and debugging tasks.",
-        "prompt_prefix": "You are a practical coding assistant. Be precise and production-minded.\n\n",
-    },
-    {
-        "name": "english",
-        "description": "Helps improve English writing and grammar.",
-        "prompt_prefix": "You are an English writing helper. Improve clarity, grammar, and tone.\n\n",
-    },
-    {
-        "name": "quant",
-        "description": "Supports quantitative and analytical reasoning.",
-        "prompt_prefix": "You are a quantitative reasoning assistant. Show concise, correct math.\n\n",
-    },
-)
-PRESET_BY_NAME = {preset["name"]: preset for preset in PRESET_DEFINITIONS}
 
 app = FastAPI(title="AI Gateway")
 
@@ -137,30 +113,6 @@ class AgentBrainResponse(BaseModel):
     overall_status: Literal["ok", "partial", "warning"]
     summary: AgentBrainSummary
     message_lines: list[str]
-
-
-def _normalize_preset_name(preset: str | None) -> str | None:
-    if preset is None:
-        return None
-
-    return preset.strip().lower()
-
-
-def _apply_prompt_preset(prompt: str, preset: str | None) -> str:
-    normalized_preset = _normalize_preset_name(preset)
-
-    if normalized_preset is None:
-        return prompt
-
-    preset_config = PRESET_BY_NAME.get(normalized_preset)
-    if preset_config is None:
-        valid_presets = ", ".join(PRESET_BY_NAME)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown preset '{preset}'. Valid presets: {valid_presets}",
-        )
-
-    return f"{preset_config['prompt_prefix']}{prompt}"
 
 
 def _resolve_model_for_request(
@@ -396,7 +348,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
         request_id=request_id,
     )
 
-    normalized_preset = _normalize_preset_name(req.preset)
+    normalized_preset = preset_service.normalize_preset_name(req.preset)
     observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
@@ -412,7 +364,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
 
     try:
         resolved_provider = _resolve_provider_for_request(req.provider)
-        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
+        shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
             requested_model=requested_model,
@@ -504,16 +456,7 @@ def presets(request: Request, response: Response):
         latency_ms=_latency_ms(start),
     )
 
-    return {
-        "presets": [
-            {
-                "name": preset["name"],
-                "description": preset["description"],
-                "prompt_prefix": preset["prompt_prefix"],
-            }
-            for preset in PRESET_DEFINITIONS
-        ]
-    }
+    return {"presets": preset_service.list_presets()}
 
 
 @app.get("/config")
@@ -578,7 +521,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id=request_id,
     )
 
-    normalized_preset = _normalize_preset_name(req.preset)
+    normalized_preset = preset_service.normalize_preset_name(req.preset)
     resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
@@ -591,7 +534,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     )
 
     try:
-        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
+        shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
         api_response = _generate_response(
             prompt=shaped_prompt,
             requested_model=requested_model,
@@ -717,7 +660,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
         request_id=request_id,
     )
 
-    normalized_preset = _normalize_preset_name(req.preset)
+    normalized_preset = preset_service.normalize_preset_name(req.preset)
     observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
@@ -733,7 +676,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
 
     try:
         resolved_provider = _resolve_provider_for_request(req.provider)
-        shaped_prompt = _apply_prompt_preset(req.prompt, req.preset)
+        shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
         upstream_generator = generate_stream(
             prompt=shaped_prompt,
             model=resolved_model,
