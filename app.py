@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 import uuid
 from typing import Literal
@@ -15,6 +16,7 @@ from services.agent_brain_status_service import collect_local_server_status
 from services import presets as preset_service
 
 from logger import logger
+from routes.operational import create_operational_router
 from ollama_client import (
     OLLAMA_BASE_URL,
     LEGACY_REQUEST_TIMEOUT,
@@ -264,78 +266,7 @@ def _log_request_event(
         logger.info(message)
 
 
-@app.get("/health/live")
-def health_live(request: Request, response: Response):
-    request_id = _request_id(request)
-    logger.info(f"liveness_check request_id={request_id}")
-    response.headers["X-Request-Id"] = request_id
-
-    return {"status": "ok"}
-
-
-@app.get("/health/ready")
-def health_ready(request: Request, response: Response):
-    start = time.perf_counter()
-    request_id = _request_id(request)
-    _log_request_event("start", "/health/ready", request_id)
-
-    try:
-        health_check()
-    except UpstreamServiceError as e:
-        _log_request_event(
-            "complete",
-            "/health/ready",
-            request_id,
-            outcome=OUTCOME_FAILURE,
-            latency_ms=_latency_ms(start),
-            error=str(e),
-        )
-        raise HTTPException(
-            status_code=503,
-            detail=str(e),
-            headers={"X-Request-Id": request_id},
-        ) from e
-
-    response.headers["X-Request-Id"] = request_id
-    _log_request_event(
-        "complete",
-        "/health/ready",
-        request_id,
-        outcome="success",
-        latency_ms=_latency_ms(start),
-    )
-
-    return {"status": "ok", "upstream": "ok"}
-
-
-@app.get("/health")
-def health(request: Request, response: Response):
-    return health_ready(request, response)
-
-
-@app.get("/version")
-def version(request: Request, response: Response):
-    start = time.perf_counter()
-    request_id = _request_id(request)
-
-    _log_request_event("start", "/version", request_id)
-
-    response.headers["X-Request-Id"] = request_id
-
-    _log_request_event(
-        "complete",
-        "/version",
-        request_id,
-        outcome=OUTCOME_SUCCESS,
-        latency_ms=_latency_ms(start),
-    )
-
-    return _safe_version_summary()
-
-
-@app.get("/metrics")
-def metrics():
-    return _metrics_snapshot()
+app.include_router(create_operational_router(sys.modules[__name__]))
 
 
 @app.post("/chat")
@@ -439,77 +370,6 @@ def models(request: Request, response: Response):
     return api_response
 
 
-@app.get("/presets")
-def presets(request: Request, response: Response):
-    start = time.perf_counter()
-    request_id = _request_id(request)
-
-    _log_request_event("start", "/presets", request_id)
-
-    response.headers["X-Request-Id"] = request_id
-
-    _log_request_event(
-        "complete",
-        "/presets",
-        request_id,
-        outcome="success",
-        latency_ms=_latency_ms(start),
-    )
-
-    return {"presets": preset_service.list_presets()}
-
-
-@app.get("/config")
-def config(request: Request, response: Response):
-    start = time.perf_counter()
-    request_id = _request_id(request)
-
-    _log_request_event("start", "/config", request_id)
-
-    response.headers["X-Request-Id"] = request_id
-
-    _log_request_event(
-        "complete",
-        "/config",
-        request_id,
-        outcome="success",
-        latency_ms=_latency_ms(start),
-    )
-
-    return {
-        "default_model": DEFAULT_MODEL,
-        "ollama_configured": bool(OLLAMA_BASE_URL),
-        "request_timeout_s": LEGACY_REQUEST_TIMEOUT,
-        "ollama_connect_timeout_s": OLLAMA_CONNECT_TIMEOUT,
-        "ollama_read_timeout_s": OLLAMA_READ_TIMEOUT,
-        "ollama_stream_read_timeout_s": OLLAMA_STREAM_READ_TIMEOUT,
-        "retry_count": RETRY_COUNT,
-    }
-
-
-@app.get("/providers")
-def providers(request: Request, response: Response):
-    start = time.perf_counter()
-    request_id = _request_id(request)
-
-    _log_request_event("start", "/providers", request_id)
-
-    response.headers["X-Request-Id"] = request_id
-
-    _log_request_event(
-        "complete",
-        "/providers",
-        request_id,
-        outcome="success",
-        latency_ms=_latency_ms(start),
-    )
-
-    return {
-        "supported_providers": list(SUPPORTED_PROVIDERS),
-        "default_provider": DEFAULT_PROVIDER,
-    }
-
-
 @app.post("/generate", deprecated=True)
 def generate_api(req: ChatRequest, request: Request, response: Response):
     start = time.perf_counter()
@@ -573,37 +433,6 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
 
     return api_response
 
-
-@app.post("/agent/brain", response_model=AgentBrainResponse)
-def agent_brain(request: Request, response: Response):
-    start = time.perf_counter()
-    request_id = _request_id(request)
-
-    _log_request_event("start", "/agent/brain", request_id)
-
-    raw_status = collect_local_server_status()
-    summary = AgentBrainSummary(
-        gateway=raw_status["gateway"],
-        disk_percent=raw_status["disk_percent"],
-        memory_percent=raw_status["memory_percent"],
-        load_average=raw_status["load_average"],
-    )
-    presentation = format_agent_brain_summary(summary)
-
-    response.headers["X-Request-Id"] = request_id
-    _log_request_event(
-        "complete",
-        "/agent/brain",
-        request_id,
-        outcome=OUTCOME_SUCCESS,
-        latency_ms=_latency_ms(start),
-    )
-
-    return AgentBrainResponse(
-        overall_status=presentation['overall_status'],
-        summary=summary,
-        message_lines=presentation['message_lines'],
-    )
 
 
 class EmbeddingRequest(BaseModel):
