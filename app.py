@@ -12,6 +12,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_status_service import collect_local_server_status
+from services.presets import (
+    PRESET_BY_NAME as SERVICE_PRESET_BY_NAME,
+    PRESET_DEFINITIONS as SERVICE_PRESET_DEFINITIONS,
+    apply_prompt_preset,
+    list_presets,
+    normalize_preset_name,
+)
 
 from logger import logger
 from ollama_client import (
@@ -89,31 +96,8 @@ def _load_model_aliases() -> dict[str, str]:
 
 
 MODEL_ALIASES = _load_model_aliases()
-# Client-facing API contract for /presets. Keep names, descriptions, and order stable
-# unless intentionally coordinating changes with downstream clients.
-PRESET_DEFINITIONS = (
-    {
-        "name": "normal",
-        "description": "Balanced assistant for general use.",
-        "prompt_prefix": "",
-    },
-    {
-        "name": "coder",
-        "description": "Focused on programming and debugging tasks.",
-        "prompt_prefix": "You are a practical coding assistant. Be precise and production-minded.\n\n",
-    },
-    {
-        "name": "english",
-        "description": "Helps improve English writing and grammar.",
-        "prompt_prefix": "You are an English writing helper. Improve clarity, grammar, and tone.\n\n",
-    },
-    {
-        "name": "quant",
-        "description": "Supports quantitative and analytical reasoning.",
-        "prompt_prefix": "You are a quantitative reasoning assistant. Show concise, correct math.\n\n",
-    },
-)
-PRESET_BY_NAME = {preset["name"]: preset for preset in PRESET_DEFINITIONS}
+PRESET_DEFINITIONS = SERVICE_PRESET_DEFINITIONS
+PRESET_BY_NAME = SERVICE_PRESET_BY_NAME
 
 app = FastAPI(title="AI Gateway")
 
@@ -140,27 +124,11 @@ class AgentBrainResponse(BaseModel):
 
 
 def _normalize_preset_name(preset: str | None) -> str | None:
-    if preset is None:
-        return None
-
-    return preset.strip().lower()
+    return normalize_preset_name(preset)
 
 
 def _apply_prompt_preset(prompt: str, preset: str | None) -> str:
-    normalized_preset = _normalize_preset_name(preset)
-
-    if normalized_preset is None:
-        return prompt
-
-    preset_config = PRESET_BY_NAME.get(normalized_preset)
-    if preset_config is None:
-        valid_presets = ", ".join(PRESET_BY_NAME)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown preset '{preset}'. Valid presets: {valid_presets}",
-        )
-
-    return f"{preset_config['prompt_prefix']}{prompt}"
+    return apply_prompt_preset(prompt, preset)
 
 
 def _resolve_model_for_request(
@@ -504,16 +472,7 @@ def presets(request: Request, response: Response):
         latency_ms=_latency_ms(start),
     )
 
-    return {
-        "presets": [
-            {
-                "name": preset["name"],
-                "description": preset["description"],
-                "prompt_prefix": preset["prompt_prefix"],
-            }
-            for preset in PRESET_DEFINITIONS
-        ]
-    }
+    return {"presets": list_presets()}
 
 
 @app.get("/config")
