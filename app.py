@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_status_service import collect_local_server_status
+from services.metrics_store import increment_metric, metrics_snapshot, reset_metrics
 from services import presets as preset_service
 
 from logger import logger
@@ -43,16 +44,6 @@ OUTCOME_FAILURE = "failure"
 OUTCOME_INCOMPLETE = "incomplete"
 APP_VERSION_ENV_KEYS = ("APP_VERSION", "VERSION")
 COMMIT_SHA_ENV_KEYS = ("COMMIT_SHA", "GIT_SHA", "GITHUB_SHA")
-METRIC_KEYS = (
-    "requests_total",
-    "chat_requests",
-    "stream_requests",
-    "embedding_requests",
-    "errors_total",
-)
-METRICS = {key: 0 for key in METRIC_KEYS}
-
-
 def _load_model_aliases() -> dict[str, str]:
     aliases = {
         "fast": os.environ.get("MODEL_ALIAS_FAST"),
@@ -219,16 +210,15 @@ def _safe_version_summary() -> dict[str, str]:
 
 
 def _increment_metric(metric_key: str) -> None:
-    METRICS[metric_key] += 1
+    increment_metric(metric_key)
 
 
 def _metrics_snapshot() -> dict[str, int]:
-    return {key: METRICS[key] for key in METRIC_KEYS}
+    return metrics_snapshot()
 
 
 def _reset_metrics() -> None:
-    for key in METRIC_KEYS:
-        METRICS[key] = 0
+    reset_metrics()
 
 
 
