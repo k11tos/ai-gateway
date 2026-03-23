@@ -48,7 +48,8 @@ Stability expectations:
 
 - Downstream clients may treat the `/presets` response shape as a stable contract.
 - The top-level `presets` array and each preset object's `name`, `description`, and `prompt_prefix` fields should be preserved for compatibility.
-- Additive changes should be preferred over renaming or removing these fields.
+- The top-level `presets` array order is also intended to remain stable, and clients may depend on the server-defined preset ordering.
+- Additive changes should be preferred over renaming, reordering, or removing these fields.
 
 
 ## Tests
