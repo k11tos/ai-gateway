@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 import uuid
 from typing import Literal
@@ -265,7 +266,7 @@ def _log_request_event(
         logger.info(message)
 
 
-app.include_router(create_operational_router(__import__(__name__)))
+app.include_router(create_operational_router(sys.modules[__name__]))
 
 
 @app.post("/chat")
