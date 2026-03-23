@@ -16,8 +16,40 @@ pip install -r requirements.txt
 - `GET /health`: 기존 호환용 endpoint로 `GET /health/ready`와 동일 동작
 - `POST /chat`: 기본 텍스트 생성 엔드포인트
 - `POST /generate`: `POST /chat`와 동일 동작(하위 호환용, deprecated)
+- `GET /presets`: preset catalog endpoint for clients that want to discover supported preset metadata
 
 신규 클라이언트는 `POST /chat` 사용을 권장합니다.
+
+### `GET /presets` contract
+
+`GET /presets` exposes the preset catalog derived from `PRESET_DEFINITIONS`. Use it when a client needs to list available presets and attach preset metadata to UI or request-building flows.
+
+Response shape:
+
+```json
+{
+  "presets": [
+    {
+      "name": "string",
+      "description": "string",
+      "prompt_prefix": "string"
+    }
+  ]
+}
+```
+
+Field meanings:
+
+- `name`: stable preset identifier for display and selection.
+- `description`: short human-readable summary of the preset's intended behavior.
+- `prompt_prefix`: text prepended by the gateway when that preset is applied.
+
+Stability expectations:
+
+- Downstream clients may treat the `/presets` response shape as a stable contract.
+- The top-level `presets` array and each preset object's `name`, `description`, and `prompt_prefix` fields should be preserved for compatibility.
+- Additive changes should be preferred over renaming or removing these fields.
+
 
 ## Tests
 
