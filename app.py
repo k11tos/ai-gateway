@@ -14,6 +14,10 @@ from pydantic import BaseModel
 from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_status_service import collect_local_server_status
 from services.metrics_store import increment_metric, metrics_snapshot, reset_metrics
+from services.non_stream_request_flow import (
+    prepare_non_stream_request_metadata,
+    run_non_stream_generation,
+)
 from services import presets as preset_service
 
 from logger import logger
@@ -263,35 +267,39 @@ app.include_router(create_operational_router(sys.modules[__name__]))
 def chat(req: ChatRequest, request: Request, response: Response):
     start = time.perf_counter()
     request_id = _request_id(request)
-    requested_model, resolved_model = _resolve_model_for_request(
-        req.model,
+    metadata = prepare_non_stream_request_metadata(
+        model=req.model,
+        provider=req.provider,
+        preset=req.preset,
         endpoint="/chat",
         request_id=request_id,
+        default_provider=DEFAULT_PROVIDER,
+        resolve_model=_resolve_model_for_request,
+        normalize_preset_name=preset_service.normalize_preset_name,
     )
-
-    normalized_preset = preset_service.normalize_preset_name(req.preset)
-    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
 
     _log_request_event(
         "start",
         "/chat",
         request_id,
-        model=requested_model,
-        preset=normalized_preset,
-        provider=observed_provider,
+        model=metadata.requested_model,
+        preset=metadata.normalized_preset,
+        provider=metadata.observed_provider,
     )
     _increment_metric("requests_total")
     _increment_metric("chat_requests")
 
     try:
         resolved_provider = _resolve_provider_for_request(req.provider)
-        shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
-        api_response = _generate_response(
-            prompt=shaped_prompt,
-            requested_model=requested_model,
-            resolved_model=resolved_model,
+        api_response = run_non_stream_generation(
+            prompt=req.prompt,
+            preset=req.preset,
+            requested_model=metadata.requested_model,
+            resolved_model=metadata.resolved_model,
             provider=resolved_provider,
             request_id=request_id,
+            apply_prompt_preset=preset_service.apply_prompt_preset,
+            generate_response=_generate_response,
         )
     except HTTPException as e:
         _increment_metric("errors_total")
@@ -299,9 +307,9 @@ def chat(req: ChatRequest, request: Request, response: Response):
             "complete",
             "/chat",
             request_id,
-            model=requested_model,
-            preset=normalized_preset,
-            provider=observed_provider,
+            model=metadata.requested_model,
+            preset=metadata.normalized_preset,
+            provider=metadata.observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -313,9 +321,9 @@ def chat(req: ChatRequest, request: Request, response: Response):
         "complete",
         "/chat",
         request_id,
-        model=requested_model,
-        preset=normalized_preset,
-        provider=observed_provider,
+        model=metadata.requested_model,
+        preset=metadata.normalized_preset,
+        provider=metadata.observed_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
@@ -365,40 +373,45 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     start = time.perf_counter()
 
     request_id = _request_id(request)
-    requested_model, resolved_model = _resolve_model_for_request(
-        req.model,
+    metadata = prepare_non_stream_request_metadata(
+        model=req.model,
+        provider=req.provider,
+        preset=req.preset,
         endpoint="/generate",
         request_id=request_id,
+        default_provider=DEFAULT_PROVIDER,
+        resolve_model=_resolve_model_for_request,
+        normalize_preset_name=preset_service.normalize_preset_name,
     )
-
-    normalized_preset = preset_service.normalize_preset_name(req.preset)
     resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
         "start",
         "/generate",
         request_id,
-        model=requested_model,
-        preset=normalized_preset,
+        model=metadata.requested_model,
+        preset=metadata.normalized_preset,
         provider=resolved_provider,
     )
 
     try:
-        shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
-        api_response = _generate_response(
-            prompt=shaped_prompt,
-            requested_model=requested_model,
-            resolved_model=resolved_model,
+        api_response = run_non_stream_generation(
+            prompt=req.prompt,
+            preset=req.preset,
+            requested_model=metadata.requested_model,
+            resolved_model=metadata.resolved_model,
             provider=resolved_provider,
             request_id=request_id,
+            apply_prompt_preset=preset_service.apply_prompt_preset,
+            generate_response=_generate_response,
         )
     except HTTPException as e:
         _log_request_event(
             "complete",
             "/generate",
             request_id,
-            model=requested_model,
-            preset=normalized_preset,
+            model=metadata.requested_model,
+            preset=metadata.normalized_preset,
             provider=resolved_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
@@ -414,8 +427,8 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         "complete",
         "/generate",
         request_id,
-        model=requested_model,
-        preset=normalized_preset,
+        model=metadata.requested_model,
+        preset=metadata.normalized_preset,
         provider=resolved_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
