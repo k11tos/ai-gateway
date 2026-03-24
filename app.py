@@ -482,39 +482,62 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
     return {"embedding": vector}
 
 
-@app.post("/generate_stream")
-def generate_stream_api(req: ChatRequest, request: Request):
-    start = time.perf_counter()
-    request_id = _request_id(request)
+def _prepare_stream_request(req: ChatRequest, request_id: str) -> dict[str, str]:
     requested_model, resolved_model = _resolve_model_for_request(
         req.model,
         endpoint="/generate_stream",
         request_id=request_id,
     )
-
     normalized_preset = preset_service.normalize_preset_name(req.preset)
-    observed_provider = req.provider.strip().lower() if isinstance(req.provider, str) else DEFAULT_PROVIDER
-
-    _log_request_event(
-        "start",
-        "/generate_stream",
-        request_id,
-        model=requested_model,
-        preset=normalized_preset,
-        provider=observed_provider,
+    observed_provider = (
+        req.provider.strip().lower()
+        if isinstance(req.provider, str)
+        else DEFAULT_PROVIDER
     )
-    _increment_metric("requests_total")
-    _increment_metric("stream_requests")
+    return {
+        "requested_model": requested_model,
+        "resolved_model": resolved_model,
+        "normalized_preset": normalized_preset,
+        "observed_provider": observed_provider,
+    }
+
+
+def _create_upstream_stream(req: ChatRequest, resolved_model: str):
+    _resolve_provider_for_request(req.provider)
+    shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
+    return generate_stream(prompt=shaped_prompt, model=resolved_model)
+
+
+def _stream_with_completion_logging(
+    upstream_generator,
+    *,
+    request_id: str,
+    requested_model: str,
+    normalized_preset: str | None,
+    observed_provider: str,
+    start: float,
+):
+    outcome = OUTCOME_SUCCESS
+    error = None
 
     try:
-        resolved_provider = _resolve_provider_for_request(req.provider)
-        shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
-        upstream_generator = generate_stream(
-            prompt=shaped_prompt,
-            model=resolved_model,
+        stream_completed = yield from _normalize_upstream_stream_events(
+            upstream_generator,
+            request_id=request_id,
         )
-    except HTTPException as e:
-        _increment_metric("errors_total")
+        if not stream_completed:
+            outcome = OUTCOME_INCOMPLETE
+    except Exception as e:
+        outcome = OUTCOME_FAILURE
+        error = str(e)
+        raise
+    except BaseException as e:
+        outcome = OUTCOME_FAILURE
+        error = type(e).__name__
+        raise
+    finally:
+        if outcome == OUTCOME_FAILURE:
+            _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/generate_stream",
@@ -522,6 +545,60 @@ def generate_stream_api(req: ChatRequest, request: Request):
             model=requested_model,
             preset=normalized_preset,
             provider=observed_provider,
+            outcome=outcome,
+            latency_ms=_latency_ms(start),
+            error=error,
+        )
+
+
+def _normalize_stream_response(upstream_generator, request_id: str | None = None):
+    return _normalize_upstream_stream_events(upstream_generator, request_id=request_id)
+
+
+@app.post("/generate_stream")
+def generate_stream_api(req: ChatRequest, request: Request):
+    start = time.perf_counter()
+    request_id = _request_id(request)
+
+    try:
+        stream_metadata = _prepare_stream_request(req, request_id)
+    except HTTPException as e:
+        _increment_metric("errors_total")
+        _log_request_event(
+            "complete",
+            "/generate_stream",
+            request_id,
+            outcome=OUTCOME_FAILURE,
+            latency_ms=_latency_ms(start),
+            error=str(e.detail),
+        )
+        raise
+
+    _log_request_event(
+        "start",
+        "/generate_stream",
+        request_id,
+        model=stream_metadata["requested_model"],
+        preset=stream_metadata["normalized_preset"],
+        provider=stream_metadata["observed_provider"],
+    )
+    _increment_metric("requests_total")
+    _increment_metric("stream_requests")
+
+    try:
+        upstream_generator = _create_upstream_stream(
+            req,
+            stream_metadata["resolved_model"],
+        )
+    except HTTPException as e:
+        _increment_metric("errors_total")
+        _log_request_event(
+            "complete",
+            "/generate_stream",
+            request_id,
+            model=stream_metadata["requested_model"],
+            preset=stream_metadata["normalized_preset"],
+            provider=stream_metadata["observed_provider"],
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -533,9 +610,9 @@ def generate_stream_api(req: ChatRequest, request: Request):
             "complete",
             "/generate_stream",
             request_id,
-            model=requested_model,
-            preset=normalized_preset,
-            provider=observed_provider,
+            model=stream_metadata["requested_model"],
+            preset=stream_metadata["normalized_preset"],
+            provider=stream_metadata["observed_provider"],
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e),
@@ -546,42 +623,15 @@ def generate_stream_api(req: ChatRequest, request: Request):
             headers={"X-Request-Id": request_id},
         ) from e
 
-    def stream_with_completion_logging():
-        outcome = OUTCOME_SUCCESS
-        error = None
-
-        try:
-            stream_completed = yield from _normalize_upstream_stream_events(
-                upstream_generator,
-                request_id=request_id,
-            )
-            if not stream_completed:
-                outcome = OUTCOME_INCOMPLETE
-        except Exception as e:
-            outcome = OUTCOME_FAILURE
-            error = str(e)
-            raise
-        except BaseException as e:
-            outcome = OUTCOME_FAILURE
-            error = type(e).__name__
-            raise
-        finally:
-            if outcome == OUTCOME_FAILURE:
-                _increment_metric("errors_total")
-            _log_request_event(
-                "complete",
-                "/generate_stream",
-                request_id,
-                model=requested_model,
-                preset=normalized_preset,
-                provider=observed_provider,
-                outcome=outcome,
-                latency_ms=_latency_ms(start),
-                error=error,
-            )
-
     response = StreamingResponse(
-        stream_with_completion_logging(),
+        _stream_with_completion_logging(
+            _normalize_stream_response(upstream_generator, request_id=request_id),
+            request_id=request_id,
+            requested_model=stream_metadata["requested_model"],
+            normalized_preset=stream_metadata["normalized_preset"],
+            observed_provider=stream_metadata["observed_provider"],
+            start=start,
+        ),
         media_type="application/x-ndjson",
     )
     response.headers["X-Request-Id"] = request_id
