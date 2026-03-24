@@ -76,3 +76,19 @@ def test_preset_service_apply_prompt_preset_accepts_normalized_input():
     shaped = presets.apply_prompt_preset("hello", " CODER ")
 
     assert shaped == presets.PRESET_BY_NAME["coder"]["prompt_prefix"] + "hello"
+
+
+def test_preset_service_list_presets_contract_is_stable():
+    listed_presets = presets.list_presets()
+
+    assert listed_presets == EXPECTED_PRESETS_CONTRACT
+    assert [preset["name"] for preset in listed_presets] == [
+        "normal",
+        "coder",
+        "english",
+        "quant",
+    ]
+    assert all(
+        set(preset.keys()) == {"name", "description", "prompt_prefix"}
+        for preset in listed_presets
+    )
