@@ -428,10 +428,12 @@ def models(request: Request, response: Response):
     request_id = _request_id(request)
 
     _log_request_event("start", "/models", request_id)
+    _increment_metric("requests_total")
 
     try:
         api_response = {"models": list_models()}
     except UpstreamServiceError as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/models",
@@ -484,6 +486,8 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         preset=metadata.normalized_preset,
         provider=resolved_provider,
     )
+    _increment_metric("requests_total")
+    _increment_metric("chat_requests")
 
     try:
         api_response = run_non_stream_generation(
@@ -497,6 +501,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             generate_response=_generate_response,
         )
     except HTTPException as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/generate",

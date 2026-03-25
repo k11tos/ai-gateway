@@ -52,6 +52,22 @@ def test_generate_stream_increments_metrics(client, monkeypatch):
     }
 
 
+def test_generate_increments_metrics(client, monkeypatch):
+    app._reset_metrics()
+    monkeypatch.setattr(app, 'generate', lambda prompt, model: 'ok')
+
+    response = client.post('/generate', json={'prompt': 'hello'})
+
+    assert response.status_code == 200
+    assert _metrics(client) == {
+        'requests_total': 1,
+        'chat_requests': 1,
+        'stream_requests': 0,
+        'embedding_requests': 0,
+        'errors_total': 0,
+    }
+
+
 def test_embedding_increments_metrics(client, monkeypatch):
     app._reset_metrics()
     monkeypatch.setattr(app, 'embedding', lambda text: [0.1])
@@ -134,6 +150,41 @@ def test_generate_stream_invalid_provider_increments_metrics_and_errors(client):
         'requests_total': 1,
         'chat_requests': 0,
         'stream_requests': 1,
+        'embedding_requests': 0,
+        'errors_total': 1,
+    }
+
+
+def test_generate_invalid_provider_preserves_existing_metric_behavior(client):
+    app._reset_metrics()
+
+    response = client.post('/generate', json={'prompt': 'hello', 'provider': 'gemini'})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        'detail': "Unsupported provider 'gemini'. Supported providers: ollama"
+    }
+    assert _metrics(client) == {
+        'requests_total': 0,
+        'chat_requests': 0,
+        'stream_requests': 0,
+        'embedding_requests': 0,
+        'errors_total': 0,
+    }
+
+
+def test_models_increments_requests_total_and_errors(client, monkeypatch):
+    app._reset_metrics()
+
+    monkeypatch.setattr(app, 'list_models', lambda: (_ for _ in ()).throw(UpstreamServiceError('down')))
+
+    response = client.get('/models')
+
+    assert response.status_code == 502
+    assert _metrics(client) == {
+        'requests_total': 1,
+        'chat_requests': 0,
+        'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 1,
     }
