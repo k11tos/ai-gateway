@@ -17,8 +17,16 @@ pip install -r requirements.txt
 - `POST /chat`: 기본 텍스트 생성 엔드포인트
 - `POST /generate`: `POST /chat`와 동일 동작(하위 호환용, deprecated)
 - `GET /presets`: preset catalog endpoint for clients that want to discover supported preset metadata
+- `GET /providers`: provider discovery endpoint (`supported_providers`, `default_provider`)
 
 신규 클라이언트는 `POST /chat` 사용을 권장합니다.
+
+### Provider behavior (current)
+
+- Current support: the gateway currently supports only `ollama`.
+- Request field relationship: the `provider` field in `POST /chat`, `POST /generate`, and `POST /generate_stream` is validated against supported providers. If omitted, the gateway uses the `default_provider` (`ollama`).
+- Unsupported handling: if `provider` is present but not supported, the request is rejected with `400 Bad Request` and an error message listing supported providers.
+- Practical guidance: clients should treat `provider` as a validated selector (not a free-form hint) and can call `GET /providers` to discover the current supported/default values.
 
 ### `GET /presets` contract
 
