@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 import time
 import uuid
 from typing import Literal
@@ -21,7 +20,10 @@ from services.non_stream_request_flow import (
 from services import presets as preset_service
 
 from logger import logger
-from routes.operational import create_operational_router
+from routes.operational import (
+    OperationalRouterDependencies,
+    create_operational_router,
+)
 from ollama_client import (
     OLLAMA_BASE_URL,
     LEGACY_REQUEST_TIMEOUT,
@@ -260,7 +262,96 @@ def _log_request_event(
         logger.info(message)
 
 
-app.include_router(create_operational_router(sys.modules[__name__]))
+class AppOperationalRouterDependencies:
+    logger = logger
+
+    def _request_id(self, request: Request) -> str:
+        return _request_id(request)
+
+    def _log_request_event(self, phase: str, endpoint: str, request_id: str, **kwargs) -> None:
+        _log_request_event(phase, endpoint, request_id, **kwargs)
+
+    def health_check(self) -> None:
+        health_check()
+
+    @property
+    def UpstreamServiceError(self):
+        return UpstreamServiceError
+
+    @property
+    def OUTCOME_FAILURE(self) -> str:
+        return OUTCOME_FAILURE
+
+    @property
+    def OUTCOME_SUCCESS(self) -> str:
+        return OUTCOME_SUCCESS
+
+    def _latency_ms(self, start: float) -> int:
+        return _latency_ms(start)
+
+    def _safe_version_summary(self) -> dict[str, str]:
+        return _safe_version_summary()
+
+    def _metrics_snapshot(self) -> dict[str, int]:
+        return _metrics_snapshot()
+
+    @property
+    def preset_service(self):
+        return preset_service
+
+    @property
+    def DEFAULT_MODEL(self) -> str:
+        return DEFAULT_MODEL
+
+    @property
+    def OLLAMA_BASE_URL(self) -> str | None:
+        return OLLAMA_BASE_URL
+
+    @property
+    def LEGACY_REQUEST_TIMEOUT(self) -> float:
+        return LEGACY_REQUEST_TIMEOUT
+
+    @property
+    def OLLAMA_CONNECT_TIMEOUT(self) -> float:
+        return OLLAMA_CONNECT_TIMEOUT
+
+    @property
+    def OLLAMA_READ_TIMEOUT(self) -> float:
+        return OLLAMA_READ_TIMEOUT
+
+    @property
+    def OLLAMA_STREAM_READ_TIMEOUT(self) -> float:
+        return OLLAMA_STREAM_READ_TIMEOUT
+
+    @property
+    def RETRY_COUNT(self) -> int:
+        return RETRY_COUNT
+
+    @property
+    def SUPPORTED_PROVIDERS(self) -> tuple[str, ...]:
+        return SUPPORTED_PROVIDERS
+
+    @property
+    def DEFAULT_PROVIDER(self) -> str:
+        return DEFAULT_PROVIDER
+
+    @property
+    def AgentBrainResponse(self):
+        return AgentBrainResponse
+
+    def collect_local_server_status(self) -> dict[str, object]:
+        return collect_local_server_status()
+
+    @property
+    def AgentBrainSummary(self):
+        return AgentBrainSummary
+
+    def format_agent_brain_summary(self, summary: AgentBrainSummary) -> dict[str, object]:
+        return format_agent_brain_summary(summary)
+
+
+operational_router_dependencies: OperationalRouterDependencies = AppOperationalRouterDependencies()
+app.include_router(create_operational_router(operational_router_dependencies))
 
 
 @app.post("/chat")

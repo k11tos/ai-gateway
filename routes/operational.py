@@ -1,8 +1,37 @@
 import time
+from typing import Any, Protocol
+
 from fastapi import APIRouter, HTTPException, Request, Response
 
 
-def create_operational_router(deps) -> APIRouter:
+class OperationalRouterDependencies(Protocol):
+    def _request_id(self, request: Request) -> str: ...
+    logger: Any
+    def _log_request_event(self, phase: str, endpoint: str, request_id: str, **kwargs: Any) -> None: ...
+    def health_check(self) -> None: ...
+    UpstreamServiceError: type[Exception]
+    OUTCOME_FAILURE: str
+    OUTCOME_SUCCESS: str
+    def _latency_ms(self, start: float) -> int: ...
+    def _safe_version_summary(self) -> dict[str, Any]: ...
+    def _metrics_snapshot(self) -> dict[str, int]: ...
+    preset_service: Any
+    DEFAULT_MODEL: str
+    OLLAMA_BASE_URL: str | None
+    LEGACY_REQUEST_TIMEOUT: float
+    OLLAMA_CONNECT_TIMEOUT: float
+    OLLAMA_READ_TIMEOUT: float
+    OLLAMA_STREAM_READ_TIMEOUT: float
+    RETRY_COUNT: int
+    SUPPORTED_PROVIDERS: tuple[str, ...]
+    DEFAULT_PROVIDER: str
+    AgentBrainResponse: Any
+    def collect_local_server_status(self) -> dict[str, Any]: ...
+    AgentBrainSummary: Any
+    def format_agent_brain_summary(self, summary: Any) -> dict[str, Any]: ...
+
+
+def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
     router = APIRouter()
 
     @router.get("/health/live")
