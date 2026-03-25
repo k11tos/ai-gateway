@@ -1,7 +1,6 @@
 import json
 import os
 import time
-import uuid
 from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -12,10 +11,21 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_status_service import collect_local_server_status
-from services.metrics_store import increment_metric, metrics_snapshot, reset_metrics
 from services.non_stream_request_flow import (
     prepare_non_stream_request_metadata,
     run_non_stream_generation,
+)
+from services.request_runtime import (
+    OUTCOME_FAILURE,
+    OUTCOME_INCOMPLETE,
+    OUTCOME_SUCCESS,
+    increment_request_metric as _increment_metric,
+    latency_ms as _latency_ms,
+    log_request_event as _log_request_event,
+    request_id as _request_id,
+    request_metrics_snapshot as _metrics_snapshot,
+    reset_request_metrics as _reset_metrics,
+    safe_version_summary as _safe_version_summary,
 )
 from services import presets as preset_service
 
@@ -45,11 +55,6 @@ DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
 DEFAULT_PROVIDER = "ollama"
 SUPPORTED_PROVIDERS = (DEFAULT_PROVIDER,)
 
-OUTCOME_SUCCESS = "success"
-OUTCOME_FAILURE = "failure"
-OUTCOME_INCOMPLETE = "incomplete"
-APP_VERSION_ENV_KEYS = ("APP_VERSION", "VERSION")
-COMMIT_SHA_ENV_KEYS = ("COMMIT_SHA", "GIT_SHA", "GITHUB_SHA")
 def _load_model_aliases() -> dict[str, str]:
     aliases = {
         "fast": os.environ.get("MODEL_ALIAS_FAST"),
@@ -180,86 +185,6 @@ def _generate_response(
         payload["resolved_model"] = resolved_model
 
     return payload
-
-
-def _request_id(request: Request) -> str:
-    return request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
-
-
-def _latency_ms(start: float) -> int:
-    return int((time.perf_counter() - start) * 1000)
-
-
-def _first_non_empty_env(*keys: str) -> str | None:
-    for key in keys:
-        value = os.environ.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    return None
-
-
-def _safe_version_summary() -> dict[str, str]:
-    app_version = _first_non_empty_env(*APP_VERSION_ENV_KEYS)
-    commit_sha = _first_non_empty_env(*COMMIT_SHA_ENV_KEYS)
-
-    summary = {
-        "app_version": app_version or "unavailable",
-        "commit_sha": (commit_sha[:7] if commit_sha else "unavailable"),
-    }
-    if app_version or commit_sha:
-        summary["status"] = "ok"
-    else:
-        summary["status"] = "unavailable"
-
-    return summary
-
-
-def _increment_metric(metric_key: str) -> None:
-    increment_metric(metric_key)
-
-
-def _metrics_snapshot() -> dict[str, int]:
-    return metrics_snapshot()
-
-
-def _reset_metrics() -> None:
-    reset_metrics()
-
-
-
-def _log_request_event(
-    phase: str,
-    endpoint: str,
-    request_id: str,
-    model: str | None = None,
-    preset: str | None = None,
-    provider: str | None = None,
-    outcome: str | None = None,
-    latency_ms: int | None = None,
-    error: str | None = None,
-):
-    fields = [f"phase={phase}", f"endpoint={endpoint}", f"request_id={request_id}"]
-
-    if model:
-        fields.append(f"model={model}")
-    if preset:
-        fields.append(f"preset={preset}")
-    if provider:
-        fields.append(f"provider={provider}")
-    if outcome:
-        fields.append(f"outcome={outcome}")
-    if latency_ms is not None:
-        fields.append(f"latency_ms={latency_ms}")
-    if error:
-        fields.append(f"error={error}")
-
-    message = " ".join(fields)
-
-    if outcome == OUTCOME_FAILURE:
-        logger.error(message)
-    else:
-        logger.info(message)
 
 
 class AppOperationalRouterDependencies:
