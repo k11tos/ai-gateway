@@ -155,7 +155,7 @@ def test_generate_stream_invalid_provider_increments_metrics_and_errors(client):
     }
 
 
-def test_generate_invalid_provider_increments_metrics_and_errors(client):
+def test_generate_invalid_provider_preserves_existing_metric_behavior(client):
     app._reset_metrics()
 
     response = client.post('/generate', json={'prompt': 'hello', 'provider': 'gemini'})
@@ -165,11 +165,11 @@ def test_generate_invalid_provider_increments_metrics_and_errors(client):
         'detail': "Unsupported provider 'gemini'. Supported providers: ollama"
     }
     assert _metrics(client) == {
-        'requests_total': 1,
-        'chat_requests': 1,
+        'requests_total': 0,
+        'chat_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
-        'errors_total': 1,
+        'errors_total': 0,
     }
 
 

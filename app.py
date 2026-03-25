@@ -476,6 +476,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         resolve_model=_resolve_model_for_request,
         normalize_preset_name=preset_service.normalize_preset_name,
     )
+    resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
         "start",
@@ -483,13 +484,12 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=metadata.requested_model,
         preset=metadata.normalized_preset,
-        provider=metadata.observed_provider,
+        provider=resolved_provider,
     )
     _increment_metric("requests_total")
     _increment_metric("chat_requests")
 
     try:
-        resolved_provider = _resolve_provider_for_request(req.provider)
         api_response = run_non_stream_generation(
             prompt=req.prompt,
             preset=req.preset,
@@ -508,7 +508,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             request_id,
             model=metadata.requested_model,
             preset=metadata.normalized_preset,
-            provider=metadata.observed_provider,
+            provider=resolved_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -525,7 +525,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=metadata.requested_model,
         preset=metadata.normalized_preset,
-        provider=metadata.observed_provider,
+        provider=resolved_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
