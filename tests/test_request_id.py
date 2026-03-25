@@ -162,6 +162,7 @@ def test_generate_stream_logs_incomplete_outcome_when_upstream_missing_done(clie
 
     assert response.status_code == 200
     assert "stream_done_missing request_id=stream-log-2" in caplog.text
+    assert caplog.text.count("stream_done_missing request_id=stream-log-2") == 1
     assert (
         "phase=complete endpoint=/generate_stream request_id=stream-log-2 "
         "model=deepseek-r1:8b provider=ollama outcome=incomplete"
