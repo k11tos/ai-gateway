@@ -428,10 +428,12 @@ def models(request: Request, response: Response):
     request_id = _request_id(request)
 
     _log_request_event("start", "/models", request_id)
+    _increment_metric("requests_total")
 
     try:
         api_response = {"models": list_models()}
     except UpstreamServiceError as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/models",
@@ -474,7 +476,6 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         resolve_model=_resolve_model_for_request,
         normalize_preset_name=preset_service.normalize_preset_name,
     )
-    resolved_provider = _resolve_provider_for_request(req.provider)
 
     _log_request_event(
         "start",
@@ -482,10 +483,13 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=metadata.requested_model,
         preset=metadata.normalized_preset,
-        provider=resolved_provider,
+        provider=metadata.observed_provider,
     )
+    _increment_metric("requests_total")
+    _increment_metric("chat_requests")
 
     try:
+        resolved_provider = _resolve_provider_for_request(req.provider)
         api_response = run_non_stream_generation(
             prompt=req.prompt,
             preset=req.preset,
@@ -497,13 +501,14 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             generate_response=_generate_response,
         )
     except HTTPException as e:
+        _increment_metric("errors_total")
         _log_request_event(
             "complete",
             "/generate",
             request_id,
             model=metadata.requested_model,
             preset=metadata.normalized_preset,
-            provider=resolved_provider,
+            provider=metadata.observed_provider,
             outcome=OUTCOME_FAILURE,
             latency_ms=_latency_ms(start),
             error=str(e.detail),
@@ -520,7 +525,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         request_id,
         model=metadata.requested_model,
         preset=metadata.normalized_preset,
-        provider=resolved_provider,
+        provider=metadata.observed_provider,
         outcome="success",
         latency_ms=_latency_ms(start),
     )
