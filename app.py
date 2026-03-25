@@ -551,9 +551,6 @@ def _stream_with_completion_logging(
         )
 
 
-def _normalize_stream_response(upstream_generator, request_id: str | None = None):
-    return _normalize_upstream_stream_events(upstream_generator, request_id=request_id)
-
 
 @app.post("/generate_stream")
 def generate_stream_api(req: ChatRequest, request: Request):
@@ -625,7 +622,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
 
     response = StreamingResponse(
         _stream_with_completion_logging(
-            _normalize_stream_response(upstream_generator, request_id=request_id),
+            upstream_generator,
             request_id=request_id,
             requested_model=stream_metadata["requested_model"],
             normalized_preset=stream_metadata["normalized_preset"],
