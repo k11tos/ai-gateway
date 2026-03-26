@@ -101,6 +101,8 @@ app = FastAPI(title="AI Gateway")
 class ChatRequest(BaseModel):
     prompt: str
     model: str | None = None
+    # Contract: clients send the original raw prompt plus preset metadata.
+    # The gateway is responsible for applying preset prompt shaping.
     preset: str | None = None
     provider: str | None = None
 
@@ -185,6 +187,16 @@ def _generate_response(
         payload["resolved_model"] = resolved_model
 
     return payload
+
+
+def _apply_gateway_prompt_preset(prompt: str, preset: str | None) -> str:
+    """Apply preset shaping inside the gateway boundary.
+
+    Downstream clients are expected to send raw `prompt` + optional `preset`
+    structured data, and not pre-shaped prompt text.
+    """
+
+    return preset_service.apply_prompt_preset(prompt, preset)
 
 
 class AppOperationalRouterDependencies:
@@ -314,7 +326,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             resolved_model=metadata.resolved_model,
             provider=resolved_provider,
             request_id=request_id,
-            apply_prompt_preset=preset_service.apply_prompt_preset,
+            apply_prompt_preset=_apply_gateway_prompt_preset,
             generate_response=_generate_response,
         )
     except HTTPException as e:
@@ -422,7 +434,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             resolved_model=metadata.resolved_model,
             provider=resolved_provider,
             request_id=request_id,
-            apply_prompt_preset=preset_service.apply_prompt_preset,
+            apply_prompt_preset=_apply_gateway_prompt_preset,
             generate_response=_generate_response,
         )
     except HTTPException as e:
@@ -525,7 +537,7 @@ def _prepare_stream_request(req: ChatRequest, request_id: str) -> dict[str, str]
 
 def _create_upstream_stream(req: ChatRequest, resolved_model: str):
     _resolve_provider_for_request(req.provider)
-    shaped_prompt = preset_service.apply_prompt_preset(req.prompt, req.preset)
+    shaped_prompt = _apply_gateway_prompt_preset(req.prompt, req.preset)
     return generate_stream(prompt=shaped_prompt, model=resolved_model)
 
 

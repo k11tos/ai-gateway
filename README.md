@@ -32,6 +32,12 @@ pip install -r requirements.txt
 
 `GET /presets` exposes the preset catalog derived from `PRESET_DEFINITIONS`. Use it when a client needs to list available presets and attach preset metadata to UI or request-building flows.
 
+Preset application contract for chat/generate requests:
+
+- Clients should send the original raw `prompt` plus optional `preset` name as structured request fields.
+- The gateway owns preset shaping and prepends the preset's `prompt_prefix` before calling upstream generation APIs.
+- Clients should **not** pre-apply preset prefixes themselves.
+
 Response shape:
 
 ```json
