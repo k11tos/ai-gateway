@@ -712,6 +712,9 @@ def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch
             "disk_percent": 71.2,
             "memory_percent": 53.4,
             "load_average": [0.12, 0.20, 0.18],
+            "uptime_seconds": 3723.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 1},
         },
     )
 
@@ -725,12 +728,18 @@ def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch
             "disk_percent": 71.2,
             "memory_percent": 53.4,
             "load_average": [0.12, 0.2, 0.18],
+            "uptime_seconds": 3723.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 1},
         },
         expected_lines=[
             "ai-gateway 정상",
             "디스크 사용률 71.2%입니다.",
             "메모리 사용률 53.4%입니다.",
             "로드 평균 0.12, 0.20, 0.18입니다.",
+            "가동 시간 1시간 2분입니다.",
+            "서비스 상태 ai-gateway=active, telegram-bot=active.",
+            "Docker 컨테이너 실행 2개, 중지 1개입니다.",
             "현재 즉시 대응이 필요한 징후는 없습니다.",
         ],
     )
@@ -744,6 +753,9 @@ def test_agent_brain_returns_partial_when_one_metric_is_missing(client, monkeypa
             "disk_percent": None,
             "memory_percent": 53.4,
             "load_average": [0.12, 0.20, 0.18],
+            "uptime_seconds": None,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": None,
         },
     )
 
@@ -757,12 +769,18 @@ def test_agent_brain_returns_partial_when_one_metric_is_missing(client, monkeypa
             "disk_percent": None,
             "memory_percent": 53.4,
             "load_average": [0.12, 0.2, 0.18],
+            "uptime_seconds": None,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": None,
         },
         expected_lines=[
             "ai-gateway 일부 지표 확인 필요",
             "디스크 사용률을 확인할 수 없습니다.",
             "메모리 사용률 53.4%입니다.",
             "로드 평균 0.12, 0.20, 0.18입니다.",
+            "가동 시간을 확인할 수 없습니다.",
+            "서비스 상태 ai-gateway=active, telegram-bot=active.",
+            "Docker 상태를 확인할 수 없습니다.",
             "일부 지표가 없어 추가 확인이 필요합니다.",
         ],
     )
@@ -776,6 +794,9 @@ def test_agent_brain_returns_warning_when_memory_percent_is_high(client, monkeyp
             "disk_percent": 71.2,
             "memory_percent": 90.0,
             "load_average": [0.12, 0.20, 0.18],
+            "uptime_seconds": 3600.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
         },
     )
 
@@ -789,12 +810,59 @@ def test_agent_brain_returns_warning_when_memory_percent_is_high(client, monkeyp
             "disk_percent": 71.2,
             "memory_percent": 90.0,
             "load_average": [0.12, 0.2, 0.18],
+            "uptime_seconds": 3600.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
         },
         expected_lines=[
             "ai-gateway 주의",
             "디스크 사용률 71.2%입니다.",
             "메모리 사용률 90.0%로 높습니다.",
             "로드 평균 0.12, 0.20, 0.18입니다.",
+            "가동 시간 1시간 0분입니다.",
+            "서비스 상태 ai-gateway=active, telegram-bot=active.",
+            "Docker 컨테이너 실행 1개, 중지 0개입니다.",
             "자원 사용률이 높아 즉시 점검이 필요합니다.",
+        ],
+    )
+
+
+def test_agent_brain_returns_warning_when_service_is_down(client, monkeypatch):
+    _mock_agent_brain_metrics(
+        monkeypatch,
+        {
+            "gateway": "ok",
+            "disk_percent": 71.2,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.20, 0.18],
+            "uptime_seconds": 3600.0,
+            "service_states": {"ai-gateway": "failed", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
+        },
+    )
+
+    response = client.post("/agent/brain")
+
+    _assert_agent_brain_response(
+        response,
+        expected_status="warning",
+        expected_summary={
+            "gateway": "ok",
+            "disk_percent": 71.2,
+            "memory_percent": 53.4,
+            "load_average": [0.12, 0.2, 0.18],
+            "uptime_seconds": 3600.0,
+            "service_states": {"ai-gateway": "failed", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
+        },
+        expected_lines=[
+            "ai-gateway 주의",
+            "디스크 사용률 71.2%입니다.",
+            "메모리 사용률 53.4%입니다.",
+            "로드 평균 0.12, 0.20, 0.18입니다.",
+            "가동 시간 1시간 0분입니다.",
+            "서비스 상태 ai-gateway=failed, telegram-bot=active.",
+            "Docker 컨테이너 실행 1개, 중지 0개입니다.",
+            "서비스 상태 경고가 감지되어 즉시 점검이 필요합니다.",
         ],
     )

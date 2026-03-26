@@ -184,6 +184,9 @@ def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
             disk_percent=raw_status["disk_percent"],
             memory_percent=raw_status["memory_percent"],
             load_average=raw_status["load_average"],
+            uptime_seconds=raw_status["uptime_seconds"],
+            service_states=raw_status["service_states"],
+            docker_summary=raw_status["docker_summary"],
         )
         presentation = deps.format_agent_brain_summary(summary)
 
