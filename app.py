@@ -425,6 +425,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
     )
     _increment_metric("requests_total")
     _increment_metric("chat_requests")
+    _increment_metric("generate_requests")
 
     try:
         api_response = run_non_stream_generation(

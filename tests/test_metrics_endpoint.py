@@ -14,6 +14,7 @@ def test_metrics_start_at_zero_in_isolated_setup(client):
     assert _metrics(client) == {
         'requests_total': 0,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 0,
@@ -30,6 +31,7 @@ def test_chat_increments_metrics(client, monkeypatch):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 1,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 0,
@@ -46,6 +48,7 @@ def test_generate_stream_increments_metrics(client, monkeypatch):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 1,
         'embedding_requests': 0,
         'errors_total': 0,
@@ -62,6 +65,7 @@ def test_generate_increments_metrics(client, monkeypatch):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 1,
+        'generate_requests': 1,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 0,
@@ -78,6 +82,7 @@ def test_embedding_increments_metrics(client, monkeypatch):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 1,
         'errors_total': 0,
@@ -93,6 +98,7 @@ def test_error_paths_increment_errors_total(client):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 1,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 1,
@@ -113,6 +119,7 @@ def test_upstream_failure_increments_errors_total(client, monkeypatch):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 1,
         'errors_total': 1,
@@ -131,6 +138,7 @@ def test_chat_invalid_provider_increments_metrics_and_errors(client):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 1,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 1,
@@ -149,6 +157,7 @@ def test_generate_stream_invalid_provider_increments_metrics_and_errors(client):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 1,
         'embedding_requests': 0,
         'errors_total': 1,
@@ -167,6 +176,7 @@ def test_generate_invalid_provider_preserves_existing_metric_behavior(client):
     assert _metrics(client) == {
         'requests_total': 0,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 0,
@@ -184,6 +194,7 @@ def test_models_increments_requests_total_and_errors(client, monkeypatch):
     assert _metrics(client) == {
         'requests_total': 1,
         'chat_requests': 0,
+        'generate_requests': 0,
         'stream_requests': 0,
         'embedding_requests': 0,
         'errors_total': 1,
