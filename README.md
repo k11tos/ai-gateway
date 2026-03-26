@@ -18,8 +18,25 @@ pip install -r requirements.txt
 - `POST /generate`: `POST /chat`와 동일 동작(하위 호환용, deprecated)
 - `GET /presets`: preset catalog endpoint for clients that want to discover supported preset metadata
 - `GET /providers`: provider discovery endpoint (`supported_providers`, `default_provider`)
+- `GET /metrics`: in-memory request counters for lightweight operational visibility
 
 신규 클라이언트는 `POST /chat` 사용을 권장합니다.
+
+### `GET /metrics` semantics
+
+The `/metrics` payload remains a simple in-memory counter snapshot:
+
+- `requests_total`: total counted API requests across instrumented endpoints.
+- `chat_requests`: non-stream text generation requests (`POST /chat` and `POST /generate`).
+- `generate_requests`: requests that specifically hit the deprecated `POST /generate` endpoint.
+- `stream_requests`: streaming text generation requests (`POST /generate_stream`).
+- `embedding_requests`: embedding requests (`POST /embedding`).
+- `errors_total`: counted request failures across instrumented endpoints.
+
+Notes:
+
+- `chat_requests` keeps its legacy aggregate behavior for backward compatibility.
+- `generate_requests` is additive and exists to disambiguate deprecated `/generate` traffic from `/chat`.
 
 ### Provider behavior (current)
 

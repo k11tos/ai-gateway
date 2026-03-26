@@ -1,6 +1,7 @@
 METRIC_KEYS = (
     "requests_total",
     "chat_requests",
+    "generate_requests",
     "stream_requests",
     "embedding_requests",
     "errors_total",
