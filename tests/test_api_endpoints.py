@@ -463,6 +463,58 @@ def test_generate_stream_applies_preset_inside_gateway_boundary(client, monkeypa
     assert seen["upstream_input"] == ("gateway-shaped::raw-input", app.DEFAULT_MODEL)
 
 
+def test_generate_stream_rejects_unknown_preset(client):
+    response = client.post(
+        "/generate_stream", json={"prompt": "hello", "preset": "unknown"}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Unknown preset 'unknown'. Valid presets: normal, coder, english, quant"
+    )
+
+
+def test_generate_rejects_unknown_preset(client):
+    response = client.post("/generate", json={"prompt": "hello", "preset": "unknown"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Unknown preset 'unknown'. Valid presets: normal, coder, english, quant"
+    )
+
+
+def test_chat_invalid_provider_does_not_call_generate(client, monkeypatch):
+    called = {"generate": False}
+
+    def fake_generate(prompt, model):
+        called["generate"] = True
+        return "generated"
+
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/chat", json={"prompt": "hello", "provider": "openai"})
+
+    assert response.status_code == 400
+    assert called["generate"] is False
+
+
+def test_generate_stream_invalid_provider_does_not_call_generate_stream(client, monkeypatch):
+    called = {"generate_stream": False}
+
+    def fake_stream(prompt, model):
+        called["generate_stream"] = True
+        return iter(['{"done":true}\n'])
+
+    monkeypatch.setattr(app, "generate_stream", fake_stream)
+
+    response = client.post(
+        "/generate_stream", json={"prompt": "hello", "provider": "gemini"}
+    )
+
+    assert response.status_code == 400
+    assert called["generate_stream"] is False
+
+
 def test_generate_keeps_original_model_when_alias_not_found(client, monkeypatch):
     monkeypatch.setattr(app, "MODEL_ALIASES", {"smart": "mistral:7b"})
     calls = {}
