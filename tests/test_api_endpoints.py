@@ -863,6 +863,6 @@ def test_agent_brain_returns_warning_when_service_is_down(client, monkeypatch):
             "가동 시간 1시간 0분입니다.",
             "서비스 상태 ai-gateway=failed, telegram-bot=active.",
             "Docker 컨테이너 실행 1개, 중지 0개입니다.",
-            "자원 사용률이 높아 즉시 점검이 필요합니다.",
+            "서비스 상태 경고가 감지되어 즉시 점검이 필요합니다.",
         ],
     )

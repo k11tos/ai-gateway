@@ -110,3 +110,4 @@ def test_format_agent_brain_summary_returns_warning_when_service_is_down():
 
     assert presentation['overall_status'] == 'warning'
     assert presentation['message_lines'][5] == '서비스 상태 ai-gateway=failed, telegram-bot=active.'
+    assert presentation['message_lines'][-1] == '서비스 상태 경고가 감지되어 즉시 점검이 필요합니다.'

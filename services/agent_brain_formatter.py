@@ -48,17 +48,10 @@ def _overall_status(
 
 
 def _is_warning(summary: AgentBrainSummaryLike) -> bool:
-    usage_warning = any(
-        value is not None and value >= WARNING_THRESHOLD_PERCENT
-        for value in (summary.disk_percent, summary.memory_percent)
-    )
-    if usage_warning:
+    if _has_resource_warning(summary):
         return True
 
-    if not summary.service_states:
-        return False
-
-    return any(state in {'failed', 'inactive'} for state in summary.service_states.values())
+    return _has_service_warning(summary)
 
 
 def _has_missing_metric(summary: AgentBrainSummaryLike) -> bool:
@@ -82,7 +75,7 @@ def _message_lines(
     lines.append(_uptime_line(summary.uptime_seconds))
     lines.append(_service_states_line(summary.service_states))
     lines.append(_docker_line(summary.docker_summary))
-    lines.append(_action_line(overall_status))
+    lines.append(_action_line(summary, overall_status=overall_status))
     return lines
 
 
@@ -127,14 +120,37 @@ def _load_average_line(load_average: list[float] | None) -> str:
     return f'로드 평균 {rendered}입니다.'
 
 
-def _action_line(overall_status: Literal['ok', 'partial', 'warning']) -> str:
+def _action_line(
+    summary: AgentBrainSummaryLike,
+    overall_status: Literal['ok', 'partial', 'warning'],
+) -> str:
     if overall_status == 'warning':
+        if _has_resource_warning(summary):
+            return '자원 사용률이 높아 즉시 점검이 필요합니다.'
+
+        if _has_service_warning(summary):
+            return '서비스 상태 경고가 감지되어 즉시 점검이 필요합니다.'
+
         return '자원 사용률이 높아 즉시 점검이 필요합니다.'
 
     if overall_status == 'partial':
         return '일부 지표가 없어 추가 확인이 필요합니다.'
 
     return '현재 즉시 대응이 필요한 징후는 없습니다.'
+
+
+def _has_resource_warning(summary: AgentBrainSummaryLike) -> bool:
+    return any(
+        value is not None and value >= WARNING_THRESHOLD_PERCENT
+        for value in (summary.disk_percent, summary.memory_percent)
+    )
+
+
+def _has_service_warning(summary: AgentBrainSummaryLike) -> bool:
+    if not summary.service_states:
+        return False
+
+    return any(state in {'failed', 'inactive'} for state in summary.service_states.values())
 
 
 def _uptime_line(uptime_seconds: float | None) -> str:
