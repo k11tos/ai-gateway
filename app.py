@@ -28,6 +28,7 @@ from services.request_runtime import (
     safe_version_summary as _safe_version_summary,
 )
 from services import presets as preset_service
+from services.provider_adapter import CallableProviderAdapter, ProviderAdapter
 
 from logger import logger
 from routes.operational import (
@@ -54,6 +55,20 @@ load_dotenv()
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
 DEFAULT_PROVIDER = "ollama"
 SUPPORTED_PROVIDERS = (DEFAULT_PROVIDER,)
+
+
+def _build_ollama_provider_adapter() -> ProviderAdapter:
+    return CallableProviderAdapter(
+        generate_fn=lambda *, prompt, model: generate(prompt=prompt, model=model),
+        generate_stream_fn=lambda *, prompt, model: generate_stream(prompt=prompt, model=model),
+        list_models_fn=lambda: list_models(),
+        embedding_fn=lambda text: embedding(text),
+    )
+
+
+PROVIDER_ADAPTERS: dict[str, ProviderAdapter] = {
+    DEFAULT_PROVIDER: _build_ollama_provider_adapter(),
+}
 
 def _load_model_aliases() -> dict[str, str]:
     aliases = {
@@ -164,16 +179,36 @@ def _resolve_provider_for_request(provider: str | None) -> str:
     )
 
 
+
+
+def _provider_adapter_for_request(provider: str | None) -> tuple[str, ProviderAdapter]:
+    resolved_provider = _resolve_provider_for_request(provider)
+    fallback_adapter = next(iter(PROVIDER_ADAPTERS.values()))
+    provider_adapter = PROVIDER_ADAPTERS.get(
+        resolved_provider,
+        fallback_adapter,
+    )
+    return resolved_provider, provider_adapter
+
+
+def _default_provider_adapter() -> ProviderAdapter:
+    return PROVIDER_ADAPTERS.get(
+        DEFAULT_PROVIDER,
+        next(iter(PROVIDER_ADAPTERS.values())),
+    )
+
+
 def _generate_response(
     prompt: str,
     requested_model: str,
     resolved_model: str,
     provider: str,
+    provider_adapter: ProviderAdapter,
     request_id: str | None = None,
 ):
 
     try:
-        response = generate(prompt=prompt, model=resolved_model)
+        response = provider_adapter.generate(prompt=prompt, model=resolved_model)
     except UpstreamServiceError as e:
         logger.error(
             "generate_upstream_error "
@@ -321,7 +356,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
     _increment_metric("chat_requests")
 
     try:
-        resolved_provider = _resolve_provider_for_request(req.provider)
+        resolved_provider, provider_adapter = _provider_adapter_for_request(req.provider)
         api_response = run_non_stream_generation(
             prompt=req.prompt,
             preset=req.preset,
@@ -331,6 +366,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             request_id=request_id,
             apply_prompt_preset=_apply_gateway_prompt_preset,
             generate_response=_generate_response,
+            provider_adapter=provider_adapter,
         )
     except HTTPException as e:
         _increment_metric("errors_total")
@@ -371,7 +407,7 @@ def models(request: Request, response: Response):
     _increment_metric("requests_total")
 
     try:
-        api_response = {"models": list_models()}
+        api_response = {"models": _default_provider_adapter().list_models()}
     except UpstreamServiceError as e:
         _increment_metric("errors_total")
         _log_request_event(
@@ -416,7 +452,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
         resolve_model=_resolve_model_for_request,
         normalize_preset_name=preset_service.normalize_preset_name,
     )
-    resolved_provider = _resolve_provider_for_request(req.provider)
+    resolved_provider, provider_adapter = _provider_adapter_for_request(req.provider)
 
     _log_request_event(
         "start",
@@ -440,6 +476,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             request_id=request_id,
             apply_prompt_preset=_apply_gateway_prompt_preset,
             generate_response=_generate_response,
+            provider_adapter=provider_adapter,
         )
     except HTTPException as e:
         _increment_metric("errors_total")
@@ -489,7 +526,7 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
     _increment_metric("embedding_requests")
 
     try:
-        vector = embedding(req.text)
+        vector = _default_provider_adapter().embedding(text=req.text)
     except UpstreamServiceError as e:
         _increment_metric("errors_total")
         _log_request_event(
@@ -540,9 +577,9 @@ def _prepare_stream_request(req: ChatRequest, request_id: str) -> dict[str, str]
 
 
 def _create_upstream_stream(req: ChatRequest, resolved_model: str):
-    _resolve_provider_for_request(req.provider)
+    _, provider_adapter = _provider_adapter_for_request(req.provider)
     shaped_prompt = _apply_gateway_prompt_preset(req.prompt, req.preset)
-    return generate_stream(prompt=shaped_prompt, model=resolved_model)
+    return provider_adapter.generate_stream(prompt=shaped_prompt, model=resolved_model)
 
 
 def _stream_with_completion_logging(
