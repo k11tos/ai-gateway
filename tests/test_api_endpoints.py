@@ -627,6 +627,14 @@ def test_providers_endpoint_returns_discovery_payload(client):
 def test_provider_validation_uses_supported_providers_source_of_truth(client, monkeypatch):
     monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("ollama", "openai"))
     monkeypatch.setattr(app, "DEFAULT_PROVIDER", "openai")
+    monkeypatch.setattr(
+        app,
+        "PROVIDER_ADAPTERS",
+        {
+            "ollama": app.PROVIDER_ADAPTERS["ollama"],
+            "openai": app.PROVIDER_ADAPTERS["ollama"],
+        },
+    )
 
     response = client.get("/providers")
 
@@ -655,6 +663,18 @@ def test_provider_validation_uses_supported_providers_source_of_truth(client, mo
     assert rejected.status_code == 400
     assert rejected.json() == {
         "detail": "Unsupported provider 'anthropic'. Supported providers: ollama, openai"
+    }
+
+
+def test_provider_adapter_resolution_fails_when_supported_provider_has_no_adapter(client, monkeypatch):
+    monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("ollama", "openai"))
+    monkeypatch.setattr(app, "PROVIDER_ADAPTERS", {"ollama": app.PROVIDER_ADAPTERS["ollama"]})
+
+    response = client.post("/chat", json={"prompt": "hello", "provider": "openai"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Provider adapter for 'openai' is not configured."
     }
 
 

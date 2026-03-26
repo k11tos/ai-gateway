@@ -183,19 +183,23 @@ def _resolve_provider_for_request(provider: str | None) -> str:
 
 def _provider_adapter_for_request(provider: str | None) -> tuple[str, ProviderAdapter]:
     resolved_provider = _resolve_provider_for_request(provider)
-    fallback_adapter = next(iter(PROVIDER_ADAPTERS.values()))
-    provider_adapter = PROVIDER_ADAPTERS.get(
-        resolved_provider,
-        fallback_adapter,
-    )
+    provider_adapter = _adapter_for_provider(resolved_provider)
     return resolved_provider, provider_adapter
 
 
 def _default_provider_adapter() -> ProviderAdapter:
-    return PROVIDER_ADAPTERS.get(
-        DEFAULT_PROVIDER,
-        next(iter(PROVIDER_ADAPTERS.values())),
-    )
+    return _adapter_for_provider(DEFAULT_PROVIDER)
+
+
+def _adapter_for_provider(provider: str) -> ProviderAdapter:
+    try:
+        return PROVIDER_ADAPTERS[provider]
+    except KeyError as e:
+        logger.error(f"provider_adapter_missing provider={provider}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Provider adapter for '{provider}' is not configured.",
+        ) from e
 
 
 def _generate_response(
