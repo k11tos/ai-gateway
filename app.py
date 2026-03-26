@@ -112,6 +112,9 @@ class AgentBrainSummary(BaseModel):
     disk_percent: float | None = None
     memory_percent: float | None = None
     load_average: list[float] | None = None
+    uptime_seconds: float | None = None
+    service_states: dict[str, str | None] | None = None
+    docker_summary: dict[str, int] | None = None
 
 
 class AgentBrainResponse(BaseModel):
