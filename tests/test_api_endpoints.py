@@ -208,6 +208,27 @@ def test_chat_accepts_normalized_preset_input(client, monkeypatch):
     }
 
 
+def test_chat_applies_preset_inside_gateway_boundary(client, monkeypatch):
+    seen = {}
+
+    def fake_apply(prompt, preset):
+        seen["apply_input"] = (prompt, preset)
+        return f"gateway-shaped::{prompt}"
+
+    def fake_generate(prompt, model):
+        seen["upstream_input"] = (prompt, model)
+        return "generated"
+
+    monkeypatch.setattr(app, "_apply_gateway_prompt_preset", fake_apply)
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/chat", json={"prompt": "raw-input", "preset": "coder"})
+
+    assert response.status_code == 200
+    assert seen["apply_input"] == ("raw-input", "coder")
+    assert seen["upstream_input"] == ("gateway-shaped::raw-input", app.DEFAULT_MODEL)
+
+
 def test_apply_prompt_preset_uses_same_source_as_presets_endpoint(client):
     response = client.get("/presets")
 
@@ -309,6 +330,27 @@ def test_generate_applies_english_preset(client, monkeypatch):
     }
 
 
+def test_generate_applies_preset_inside_gateway_boundary(client, monkeypatch):
+    seen = {}
+
+    def fake_apply(prompt, preset):
+        seen["apply_input"] = (prompt, preset)
+        return f"gateway-shaped::{prompt}"
+
+    def fake_generate(prompt, model):
+        seen["upstream_input"] = (prompt, model)
+        return "generated"
+
+    monkeypatch.setattr(app, "_apply_gateway_prompt_preset", fake_apply)
+    monkeypatch.setattr(app, "generate", fake_generate)
+
+    response = client.post("/generate", json={"prompt": "raw-input", "preset": "english"})
+
+    assert response.status_code == 200
+    assert seen["apply_input"] == ("raw-input", "english")
+    assert seen["upstream_input"] == ("gateway-shaped::raw-input", app.DEFAULT_MODEL)
+
+
 def test_generate_stream_returns_normalized_chunks(client, monkeypatch):
     seen = {}
 
@@ -396,6 +438,29 @@ def test_generate_stream_applies_quant_preset(client, monkeypatch):
         "prompt": presets.PRESET_BY_NAME["quant"]["prompt_prefix"] + "solve",
         "model": app.DEFAULT_MODEL,
     }
+
+
+def test_generate_stream_applies_preset_inside_gateway_boundary(client, monkeypatch):
+    seen = {}
+
+    def fake_apply(prompt, preset):
+        seen["apply_input"] = (prompt, preset)
+        return f"gateway-shaped::{prompt}"
+
+    def fake_stream(prompt, model):
+        seen["upstream_input"] = (prompt, model)
+        return iter(['{"done":true}\n'])
+
+    monkeypatch.setattr(app, "_apply_gateway_prompt_preset", fake_apply)
+    monkeypatch.setattr(app, "generate_stream", fake_stream)
+
+    response = client.post(
+        "/generate_stream", json={"prompt": "raw-input", "preset": "quant"}
+    )
+
+    assert response.status_code == 200
+    assert seen["apply_input"] == ("raw-input", "quant")
+    assert seen["upstream_input"] == ("gateway-shaped::raw-input", app.DEFAULT_MODEL)
 
 
 def test_generate_keeps_original_model_when_alias_not_found(client, monkeypatch):
