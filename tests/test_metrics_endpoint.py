@@ -1,4 +1,5 @@
 import app
+import pytest
 from ollama_client import UpstreamServiceError
 
 
@@ -199,3 +200,131 @@ def test_models_increments_requests_total_and_errors(client, monkeypatch):
         'embedding_requests': 0,
         'errors_total': 1,
     }
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "payload", "patch_target", "expected_metrics"),
+    [
+        (
+            "/chat",
+            {"prompt": "hello"},
+            "generate",
+            {
+                "requests_total": 1,
+                "chat_requests": 1,
+                "generate_requests": 0,
+                "stream_requests": 0,
+                "embedding_requests": 0,
+                "errors_total": 0,
+            },
+        ),
+        (
+            "/generate",
+            {"prompt": "hello"},
+            "generate",
+            {
+                "requests_total": 1,
+                "chat_requests": 1,
+                "generate_requests": 1,
+                "stream_requests": 0,
+                "embedding_requests": 0,
+                "errors_total": 0,
+            },
+        ),
+        (
+            "/generate_stream",
+            {"prompt": "hello"},
+            "generate_stream",
+            {
+                "requests_total": 1,
+                "chat_requests": 0,
+                "generate_requests": 0,
+                "stream_requests": 1,
+                "embedding_requests": 0,
+                "errors_total": 0,
+            },
+        ),
+        (
+            "/embedding",
+            {"text": "hello"},
+            "embedding",
+            {
+                "requests_total": 1,
+                "chat_requests": 0,
+                "generate_requests": 0,
+                "stream_requests": 0,
+                "embedding_requests": 1,
+                "errors_total": 0,
+            },
+        ),
+    ],
+)
+def test_main_endpoints_increment_request_metrics(
+    client, monkeypatch, endpoint, payload, patch_target, expected_metrics
+):
+    app._reset_metrics()
+
+    if patch_target == "generate_stream":
+        monkeypatch.setattr(app, patch_target, lambda prompt, model: iter(['{"done":true}\n']))
+    elif patch_target == "embedding":
+        monkeypatch.setattr(app, patch_target, lambda text: [0.1])
+    else:
+        monkeypatch.setattr(app, patch_target, lambda prompt, model: "ok")
+
+    response = client.post(endpoint, json=payload)
+
+    assert response.status_code == 200
+    assert _metrics(client) == expected_metrics
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "payload", "expected_metrics"),
+    [
+        (
+            "/chat",
+            {"prompt": "hello", "preset": "unknown"},
+            {
+                "requests_total": 1,
+                "chat_requests": 1,
+                "generate_requests": 0,
+                "stream_requests": 0,
+                "embedding_requests": 0,
+                "errors_total": 1,
+            },
+        ),
+        (
+            "/generate",
+            {"prompt": "hello", "preset": "unknown"},
+            {
+                "requests_total": 1,
+                "chat_requests": 1,
+                "generate_requests": 1,
+                "stream_requests": 0,
+                "embedding_requests": 0,
+                "errors_total": 1,
+            },
+        ),
+        (
+            "/generate_stream",
+            {"prompt": "hello", "preset": "unknown"},
+            {
+                "requests_total": 1,
+                "chat_requests": 0,
+                "generate_requests": 0,
+                "stream_requests": 1,
+                "embedding_requests": 0,
+                "errors_total": 1,
+            },
+        ),
+    ],
+)
+def test_invalid_preset_increments_error_metrics(client, endpoint, payload, expected_metrics):
+    app._reset_metrics()
+
+    response = client.post(endpoint, json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Unknown preset 'unknown'. Valid presets: normal, coder, english, quant"
+    )
+    assert _metrics(client) == expected_metrics
