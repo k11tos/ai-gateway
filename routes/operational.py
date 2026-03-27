@@ -29,6 +29,8 @@ class OperationalRouterDependencies(Protocol):
     def collect_local_server_status(self) -> dict[str, Any]: ...
     AgentBrainSummary: Any
     def format_agent_brain_summary(self, summary: Any) -> dict[str, Any]: ...
+    def detect_agent_brain_changes(self, previous_snapshot: Any, current_snapshot: Any) -> Any: ...
+    def format_agent_brain_changes(self, change_set: Any) -> dict[str, Any]: ...
     def get_previous_agent_brain_snapshot(self) -> Any: ...
     def set_latest_agent_brain_snapshot(self, snapshot: Any) -> None: ...
 
@@ -192,8 +194,9 @@ def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
         )
         previous_snapshot = deps.get_previous_agent_brain_snapshot()
         current_snapshot = summary
+        change_set = deps.detect_agent_brain_changes(previous_snapshot, current_snapshot)
+        change_presentation = deps.format_agent_brain_changes(change_set)
         deps.set_latest_agent_brain_snapshot(current_snapshot)
-        _ = previous_snapshot  # Reserved for change-detection wiring in a follow-up step.
         presentation = deps.format_agent_brain_summary(summary)
 
         response.headers["X-Request-Id"] = request_id
@@ -209,6 +212,8 @@ def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
             overall_status=presentation["overall_status"],
             summary=summary,
             message_lines=presentation["message_lines"],
+            has_notable_changes=change_presentation["has_notable_changes"],
+            changes=change_presentation["changes"],
         )
 
     return router

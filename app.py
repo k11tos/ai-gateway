@@ -9,6 +9,9 @@ from fastapi import Request
 from fastapi import Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from pydantic import Field
+from services.agent_brain_change_detector import detect_agent_brain_changes
+from services.agent_brain_change_formatter import format_agent_brain_changes
 from services.agent_brain_formatter import format_agent_brain_summary
 from services.agent_brain_snapshot_store import agent_brain_snapshot_store
 from services.agent_brain_status_service import collect_local_server_status
@@ -133,11 +136,26 @@ class AgentBrainSummary(BaseModel):
     docker_summary: dict[str, int] | None = None
 
 
+class AgentBrainChange(BaseModel):
+    kind: Literal[
+        "metric_delta",
+        "service_state_change",
+        "docker_summary_change",
+        "restart_detected",
+    ]
+    field: str
+    previous: float | int | str | None | dict[str, int]
+    current: float | int | str | None | dict[str, int]
+    notable: bool = True
+
+
 class AgentBrainResponse(BaseModel):
     status: Literal["ok"] = "ok"
     overall_status: Literal["ok", "partial", "warning"]
     summary: AgentBrainSummary
     message_lines: list[str]
+    has_notable_changes: bool = False
+    changes: list[AgentBrainChange] = Field(default_factory=list)
 
 
 def _resolve_model_for_request(
@@ -328,6 +346,12 @@ class AppOperationalRouterDependencies:
 
     def format_agent_brain_summary(self, summary: AgentBrainSummary) -> dict[str, object]:
         return format_agent_brain_summary(summary)
+
+    def detect_agent_brain_changes(self, previous_snapshot, current_snapshot):
+        return detect_agent_brain_changes(previous_snapshot, current_snapshot)
+
+    def format_agent_brain_changes(self, change_set) -> dict[str, object]:
+        return format_agent_brain_changes(change_set)
 
     def get_previous_agent_brain_snapshot(self):
         return agent_brain_snapshot_store.get_last_snapshot()
