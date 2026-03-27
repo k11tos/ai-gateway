@@ -33,6 +33,8 @@ def test_detect_agent_brain_changes_without_previous_snapshot():
     assert first.has_previous_snapshot is False
     assert first.restart_detected is False
     assert first.uptime_drop_seconds is None
+    assert first.previous_uptime_seconds is None
+    assert first.current_uptime_seconds is None
     assert first.metric_deltas == []
     assert first.service_state_changes == []
     assert first.docker_summary_change is None
@@ -51,6 +53,8 @@ def test_detect_agent_brain_changes_detects_restart_from_uptime_drop():
     assert changes.has_previous_snapshot is True
     assert changes.restart_detected is True
     assert changes.uptime_drop_seconds == 7080.0
+    assert changes.previous_uptime_seconds == 7200.0
+    assert changes.current_uptime_seconds == 120.0
 
 
 def test_detect_agent_brain_changes_detects_service_state_change():

@@ -716,13 +716,20 @@ def _assert_agent_brain_response(response, *, expected_status, expected_summary,
 
     payload = response.json()
 
-    assert set(payload) == {"status", "overall_status", "summary", "message_lines"}
+    assert {"status", "overall_status", "summary", "message_lines"}.issubset(payload.keys())
+    assert "has_notable_changes" in payload
+    assert "changes" in payload
     assert payload["status"] == "ok"
     assert payload["overall_status"] == expected_status
     assert payload["summary"] == expected_summary
     assert isinstance(payload["message_lines"], list)
     assert payload["message_lines"]
     assert payload["message_lines"] == expected_lines
+
+
+def _assert_empty_changes(payload):
+    assert payload["has_notable_changes"] is False
+    assert payload["changes"] == []
 
 
 def test_agent_brain_returns_ok_when_all_metrics_are_present(client, monkeypatch):
@@ -917,6 +924,7 @@ def test_agent_brain_first_request_has_no_previous_snapshot(client, monkeypatch)
 
     assert response.status_code == 200
     assert observed_previous_snapshots == [None]
+    _assert_empty_changes(response.json())
 
 
 def test_agent_brain_second_request_reads_first_snapshot_as_previous(client, monkeypatch):
@@ -1017,3 +1025,106 @@ def test_agent_brain_snapshot_store_is_updated_after_each_request(client, monkey
 
     client.post("/agent/brain")
     assert store.get_last_snapshot().disk_percent == 50.0
+
+
+def test_agent_brain_second_call_returns_structured_service_change(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    statuses = iter([
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 1000.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 0},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 1100.0,
+            "service_states": {"ai-gateway": "failed", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 0},
+        },
+    ])
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: store.get_last_snapshot(),
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    first_response = client.post("/agent/brain")
+    second_response = client.post("/agent/brain")
+
+    _assert_empty_changes(first_response.json())
+    assert second_response.status_code == 200
+    payload = second_response.json()
+    assert payload["has_notable_changes"] is True
+    assert payload["changes"] == [
+        {
+            "kind": "service_state_change",
+            "field": "service_states.ai-gateway",
+            "previous": "active",
+            "current": "failed",
+            "notable": True,
+        }
+    ]
+
+
+def test_agent_brain_restart_like_uptime_drop_returns_structured_change(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    statuses = iter([
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 7200.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 0},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 120.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 0},
+        },
+    ])
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: store.get_last_snapshot(),
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    client.post("/agent/brain")
+    response = client.post("/agent/brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["has_notable_changes"] is True
+    assert {
+        "kind": "restart_detected",
+        "field": "uptime_seconds",
+        "previous": 7200.0,
+        "current": 120.0,
+        "notable": True,
+    } in payload["changes"]

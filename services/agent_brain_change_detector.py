@@ -43,6 +43,8 @@ class AgentBrainChangeSet:
     has_previous_snapshot: bool
     restart_detected: bool
     uptime_drop_seconds: float | None
+    previous_uptime_seconds: float | None
+    current_uptime_seconds: float | None
     metric_deltas: list[MetricDelta]
     service_state_changes: list[ServiceStateChange]
     docker_summary_change: DockerSummaryChange | None
@@ -53,6 +55,8 @@ def _no_previous_snapshot_changeset() -> AgentBrainChangeSet:
         has_previous_snapshot=False,
         restart_detected=False,
         uptime_drop_seconds=None,
+        previous_uptime_seconds=None,
+        current_uptime_seconds=None,
         metric_deltas=[],
         service_state_changes=[],
         docker_summary_change=None,
@@ -73,6 +77,8 @@ def detect_agent_brain_changes(
         has_previous_snapshot=True,
         restart_detected=(uptime_drop_seconds is not None and uptime_drop_seconds >= UPTIME_RESTART_DROP_THRESHOLD_SECONDS),
         uptime_drop_seconds=uptime_drop_seconds,
+        previous_uptime_seconds=previous.uptime_seconds,
+        current_uptime_seconds=current.uptime_seconds,
         metric_deltas=metric_deltas,
         service_state_changes=_service_state_changes(previous, current),
         docker_summary_change=_docker_summary_change(previous, current),
