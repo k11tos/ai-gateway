@@ -344,8 +344,12 @@ class AppOperationalRouterDependencies:
     def AgentBrainSummary(self):
         return AgentBrainSummary
 
-    def format_agent_brain_summary(self, summary: AgentBrainSummary) -> dict[str, object]:
-        return format_agent_brain_summary(summary)
+    def format_agent_brain_summary(
+        self,
+        summary: AgentBrainSummary,
+        changes: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        return format_agent_brain_summary(summary, changes)
 
     def detect_agent_brain_changes(self, previous_snapshot, current_snapshot):
         return detect_agent_brain_changes(previous_snapshot, current_snapshot)

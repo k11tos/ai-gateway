@@ -709,6 +709,16 @@ def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch,
 
 def _mock_agent_brain_metrics(monkeypatch, status):
     monkeypatch.setattr(app, "collect_local_server_status", lambda: status)
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: None,
+    )
 
 
 def _assert_agent_brain_response(response, *, expected_status, expected_summary, expected_lines):
@@ -1078,6 +1088,7 @@ def test_agent_brain_second_call_returns_structured_service_change(client, monke
             "notable": True,
         }
     ]
+    assert payload["message_lines"][-1] == "경고: ai-gateway 상태 active→failed."
 
 
 def test_agent_brain_restart_like_uptime_drop_returns_structured_change(client, monkeypatch):
@@ -1128,3 +1139,106 @@ def test_agent_brain_restart_like_uptime_drop_returns_structured_change(client, 
         "current": 120.0,
         "notable": True,
     } in payload["changes"]
+    assert payload["message_lines"][-1] == "가동 시간이 급감해 재시작이 의심됩니다."
+
+
+def test_agent_brain_second_call_with_no_notable_changes_has_no_change_lines(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    statuses = iter([
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 1200.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 1},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 51.0,
+            "memory_percent": 41.0,
+            "load_average": [0.11, 0.21, 0.31],
+            "uptime_seconds": 1260.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 1},
+        },
+    ])
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: store.get_last_snapshot(),
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    client.post("/agent/brain")
+    response = client.post("/agent/brain")
+
+    payload = response.json()
+    _assert_empty_changes(payload)
+    assert payload["message_lines"] == [
+        "ai-gateway 정상",
+        "디스크 사용률 51.0%입니다.",
+        "메모리 사용률 41.0%입니다.",
+        "로드 평균 0.11, 0.21, 0.31입니다.",
+        "가동 시간 21분입니다.",
+        "서비스 상태 ai-gateway=active, telegram-bot=active.",
+        "Docker 컨테이너 실행 2개, 중지 1개입니다.",
+        "현재 즉시 대응이 필요한 징후는 없습니다.",
+    ]
+
+
+def test_agent_brain_second_call_returns_concise_docker_change_line(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    statuses = iter([
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 1200.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 1},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 40.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 1260.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 2},
+        },
+    ])
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: store.get_last_snapshot(),
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    client.post("/agent/brain")
+    response = client.post("/agent/brain")
+
+    payload = response.json()
+    assert payload["has_notable_changes"] is True
+    assert {
+        "kind": "docker_summary_change",
+        "field": "docker_summary",
+        "previous": {"running": 2, "stopped": 1},
+        "current": {"running": 1, "stopped": 2},
+        "notable": True,
+    } in payload["changes"]
+    assert payload["message_lines"][-1] == "Docker 변화: 실행 2→1, 중지 1→2."

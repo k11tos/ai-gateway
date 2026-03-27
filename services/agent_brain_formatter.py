@@ -20,14 +20,33 @@ class AgentBrainPresentation(TypedDict):
     message_lines: list[str]
 
 
+class AgentBrainChangeLike(TypedDict):
+    kind: Literal[
+        'metric_delta',
+        'service_state_change',
+        'docker_summary_change',
+        'restart_detected',
+    ]
+    field: str
+    previous: float | int | str | None | dict[str, int]
+    current: float | int | str | None | dict[str, int]
+    notable: bool
+
+
+class AgentBrainChangesPresentationLike(Protocol):
+    has_notable_changes: bool
+    changes: list[AgentBrainChangeLike]
+
+
 def format_agent_brain_summary(
     summary: AgentBrainSummaryLike,
+    changes: AgentBrainChangesPresentationLike | None = None,
 ) -> AgentBrainPresentation:
     overall_status = _overall_status(summary)
 
     return {
         'overall_status': overall_status,
-        'message_lines': _message_lines(summary, overall_status=overall_status),
+        'message_lines': _message_lines(summary, overall_status=overall_status, changes=changes),
     }
 
 
@@ -67,6 +86,7 @@ def _message_lines(
     summary: AgentBrainSummaryLike,
     *,
     overall_status: Literal['ok', 'partial', 'warning'],
+    changes: AgentBrainChangesPresentationLike | None,
 ) -> list[str]:
     lines = [_gateway_line(summary.gateway, overall_status=overall_status)]
     lines.append(_disk_line(summary.disk_percent))
@@ -76,7 +96,93 @@ def _message_lines(
     lines.append(_service_states_line(summary.service_states))
     lines.append(_docker_line(summary.docker_summary))
     lines.append(_action_line(summary, overall_status=overall_status))
+    lines.extend(_change_lines(changes))
     return lines
+
+
+def _change_lines(changes: AgentBrainChangesPresentationLike | None) -> list[str]:
+    if changes is None:
+        return []
+
+    has_notable_changes = (
+        changes.get('has_notable_changes', False)
+        if isinstance(changes, dict)
+        else changes.has_notable_changes
+    )
+    if not has_notable_changes:
+        return []
+
+    change_items = changes.get('changes', []) if isinstance(changes, dict) else changes.changes
+
+    restart_lines = []
+    service_lines = []
+    docker_lines = []
+    resource_lines = []
+    other_metric_lines = []
+
+    for change in change_items:
+        kind = change['kind']
+        if kind == 'restart_detected':
+            restart_lines.append('가동 시간이 급감해 재시작이 의심됩니다.')
+            continue
+
+        if kind == 'service_state_change':
+            service_name = change['field'].removeprefix('service_states.')
+            previous_state = _render_state(change['previous'])
+            current_state = _render_state(change['current'])
+            if current_state in {'failed', 'inactive'}:
+                service_lines.append(f'경고: {service_name} 상태 {previous_state}→{current_state}.')
+            else:
+                service_lines.append(f'{service_name} 상태 변경 {previous_state}→{current_state}.')
+            continue
+
+        if kind == 'docker_summary_change':
+            previous = change['previous'] if isinstance(change['previous'], dict) else {}
+            current = change['current'] if isinstance(change['current'], dict) else {}
+            previous_running = previous.get('running', 0)
+            current_running = current.get('running', 0)
+            previous_stopped = previous.get('stopped', 0)
+            current_stopped = current.get('stopped', 0)
+            docker_lines.append(
+                f'Docker 변화: 실행 {previous_running}→{current_running}, 중지 {previous_stopped}→{current_stopped}.'
+            )
+            continue
+
+        if kind == 'metric_delta':
+            metric_line = _metric_change_line(change)
+            if metric_line is None:
+                continue
+            if change['field'] in {'disk_percent', 'memory_percent'}:
+                resource_lines.append(metric_line)
+            else:
+                other_metric_lines.append(metric_line)
+
+    return restart_lines + service_lines + docker_lines + resource_lines + other_metric_lines
+
+
+def _render_state(value: float | int | str | None | dict[str, int]) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return 'unknown'
+    return str(value)
+
+
+def _metric_change_line(change: AgentBrainChangeLike) -> str | None:
+    previous = change['previous']
+    current = change['current']
+    if not isinstance(previous, (int, float)) or not isinstance(current, (int, float)):
+        return None
+
+    field = change['field']
+    if field == 'disk_percent':
+        return f'디스크 사용률 변화 {previous:.1f}%→{current:.1f}%.'
+    if field == 'memory_percent':
+        return f'메모리 사용률 변화 {previous:.1f}%→{current:.1f}%.'
+    if field == 'load_average':
+        return f'로드 평균(1분) 변화 {previous:.2f}→{current:.2f}.'
+
+    return None
 
 
 def _gateway_line(
