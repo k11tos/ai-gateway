@@ -48,14 +48,15 @@ class AgentBrainChangeSet:
     docker_summary_change: DockerSummaryChange | None
 
 
-NO_PREVIOUS_SNAPSHOT_CHANGESET = AgentBrainChangeSet(
-    has_previous_snapshot=False,
-    restart_detected=False,
-    uptime_drop_seconds=None,
-    metric_deltas=[],
-    service_state_changes=[],
-    docker_summary_change=None,
-)
+def _no_previous_snapshot_changeset() -> AgentBrainChangeSet:
+    return AgentBrainChangeSet(
+        has_previous_snapshot=False,
+        restart_detected=False,
+        uptime_drop_seconds=None,
+        metric_deltas=[],
+        service_state_changes=[],
+        docker_summary_change=None,
+    )
 
 
 def detect_agent_brain_changes(
@@ -63,7 +64,7 @@ def detect_agent_brain_changes(
     current: AgentBrainSnapshotLike,
 ) -> AgentBrainChangeSet:
     if previous is None:
-        return NO_PREVIOUS_SNAPSHOT_CHANGESET
+        return _no_previous_snapshot_changeset()
 
     metric_deltas = _metric_deltas(previous, current)
     uptime_drop_seconds = _uptime_drop_seconds(previous, current)

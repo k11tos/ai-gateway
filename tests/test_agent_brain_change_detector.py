@@ -27,14 +27,19 @@ def _snapshot(**overrides) -> Snapshot:
 
 
 def test_detect_agent_brain_changes_without_previous_snapshot():
-    changes = detect_agent_brain_changes(None, _snapshot())
+    first = detect_agent_brain_changes(None, _snapshot())
+    second = detect_agent_brain_changes(None, _snapshot())
 
-    assert changes.has_previous_snapshot is False
-    assert changes.restart_detected is False
-    assert changes.uptime_drop_seconds is None
-    assert changes.metric_deltas == []
-    assert changes.service_state_changes == []
-    assert changes.docker_summary_change is None
+    assert first.has_previous_snapshot is False
+    assert first.restart_detected is False
+    assert first.uptime_drop_seconds is None
+    assert first.metric_deltas == []
+    assert first.service_state_changes == []
+    assert first.docker_summary_change is None
+
+    assert first is not second
+    assert first.metric_deltas is not second.metric_deltas
+    assert first.service_state_changes is not second.service_state_changes
 
 
 def test_detect_agent_brain_changes_detects_restart_from_uptime_drop():
