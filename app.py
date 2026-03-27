@@ -10,6 +10,7 @@ from fastapi import Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.agent_brain_formatter import format_agent_brain_summary
+from services.agent_brain_snapshot_store import agent_brain_snapshot_store
 from services.agent_brain_status_service import collect_local_server_status
 from services.non_stream_request_flow import (
     prepare_non_stream_request_metadata,
@@ -327,6 +328,12 @@ class AppOperationalRouterDependencies:
 
     def format_agent_brain_summary(self, summary: AgentBrainSummary) -> dict[str, object]:
         return format_agent_brain_summary(summary)
+
+    def get_previous_agent_brain_snapshot(self):
+        return agent_brain_snapshot_store.get_last_snapshot()
+
+    def set_latest_agent_brain_snapshot(self, snapshot) -> None:
+        agent_brain_snapshot_store.set_last_snapshot(snapshot)
 
 
 operational_router_dependencies: OperationalRouterDependencies = AppOperationalRouterDependencies()

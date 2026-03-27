@@ -1,5 +1,6 @@
 import app
 from services import presets
+from services.agent_brain_snapshot_store import InMemoryAgentBrainSnapshotStore
 from ollama_client import UpstreamServiceError
 
 
@@ -886,3 +887,133 @@ def test_agent_brain_returns_warning_when_service_is_down(client, monkeypatch):
             "서비스 상태 경고가 감지되어 즉시 점검이 필요합니다.",
         ],
     )
+
+
+def test_agent_brain_first_request_has_no_previous_snapshot(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    observed_previous_snapshots = []
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: {
+        "gateway": "ok",
+        "disk_percent": 71.2,
+        "memory_percent": 53.4,
+        "load_average": [0.12, 0.20, 0.18],
+        "uptime_seconds": 3723.0,
+        "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+        "docker_summary": {"running": 2, "stopped": 1},
+    })
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: observed_previous_snapshots.append(store.get_last_snapshot()) or observed_previous_snapshots[-1],
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    response = client.post("/agent/brain")
+
+    assert response.status_code == 200
+    assert observed_previous_snapshots == [None]
+
+
+def test_agent_brain_second_request_reads_first_snapshot_as_previous(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    observed_previous_snapshots = []
+    statuses = iter([
+        {
+            "gateway": "ok",
+            "disk_percent": 61.0,
+            "memory_percent": 45.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 120.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 62.0,
+            "memory_percent": 46.0,
+            "load_average": [0.11, 0.21, 0.31],
+            "uptime_seconds": 180.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
+        },
+    ])
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: observed_previous_snapshots.append(store.get_last_snapshot()) or observed_previous_snapshots[-1],
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    client.post("/agent/brain")
+    client.post("/agent/brain")
+
+    assert observed_previous_snapshots[0] is None
+    assert observed_previous_snapshots[1] is not None
+    assert observed_previous_snapshots[1].disk_percent == 61.0
+    assert observed_previous_snapshots[1].uptime_seconds == 120.0
+
+
+def test_agent_brain_snapshot_store_is_updated_after_each_request(client, monkeypatch):
+    store = InMemoryAgentBrainSnapshotStore()
+    statuses = iter([
+        {
+            "gateway": "ok",
+            "disk_percent": 10.0,
+            "memory_percent": 20.0,
+            "load_average": [0.10, 0.20, 0.30],
+            "uptime_seconds": 100.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 1, "stopped": 0},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 30.0,
+            "memory_percent": 40.0,
+            "load_average": [0.20, 0.30, 0.40],
+            "uptime_seconds": 200.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 0},
+        },
+        {
+            "gateway": "ok",
+            "disk_percent": 50.0,
+            "memory_percent": 60.0,
+            "load_average": [0.30, 0.40, 0.50],
+            "uptime_seconds": 300.0,
+            "service_states": {"ai-gateway": "active", "telegram-bot": "active"},
+            "docker_summary": {"running": 2, "stopped": 1},
+        },
+    ])
+
+    monkeypatch.setattr(app, "collect_local_server_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "get_previous_agent_brain_snapshot",
+        lambda: store.get_last_snapshot(),
+    )
+    monkeypatch.setattr(
+        app.operational_router_dependencies,
+        "set_latest_agent_brain_snapshot",
+        lambda snapshot: store.set_last_snapshot(snapshot),
+    )
+
+    client.post("/agent/brain")
+    assert store.get_last_snapshot() is not None
+    assert store.get_last_snapshot().disk_percent == 10.0
+
+    client.post("/agent/brain")
+    assert store.get_last_snapshot().disk_percent == 30.0
+
+    client.post("/agent/brain")
+    assert store.get_last_snapshot().disk_percent == 50.0
