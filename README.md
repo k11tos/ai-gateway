@@ -82,6 +82,50 @@ Stability expectations:
 - The top-level `presets` array order is also intended to remain stable, and clients may depend on the server-defined preset ordering.
 - Additive changes should be preferred over renaming, reordering, or removing these fields.
 
+### `GET /agent/brain` contract
+
+`/agent/brain` is a lightweight, deterministic local operational summary endpoint for downstream clients that need a concise server briefing plus machine-readable change signals.
+
+Current point-in-time summary fields:
+
+- `status`: high-level endpoint status string.
+- `overall_status`: aggregated current operational status.
+- `summary`: concise current snapshot of server state.
+- `message_lines`: short Korean human-readable briefing lines for quick operator context.
+
+Additive change fields:
+
+- `has_notable_changes`: boolean indicating whether notable differences were detected compared to the immediately previous snapshot.
+- `changes`: machine-friendly list of structured change items describing what changed since the previous snapshot.
+
+First-call and comparison semantics:
+
+- On the first request after process startup (no previous snapshot), `has_notable_changes` is `false` and `changes` is an empty array.
+- Previous-snapshot comparison is best-effort, process-local, and in-memory only.
+- Change tracking resets when the process restarts.
+
+Example response shape:
+
+```json
+{
+  "status": "ok",
+  "overall_status": "healthy",
+  "summary": "모든 핵심 컴포넌트가 정상 동작 중입니다.",
+  "message_lines": [
+    "현재 트래픽은 안정적입니다.",
+    "upstream 연결 상태가 양호합니다."
+  ],
+  "has_notable_changes": true,
+  "changes": [
+    {
+      "type": "upstream_status_changed",
+      "from": "degraded",
+      "to": "healthy"
+    }
+  ]
+}
+```
+
 
 ## Tests
 
