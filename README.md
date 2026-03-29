@@ -82,7 +82,7 @@ Stability expectations:
 - The top-level `presets` array order is also intended to remain stable, and clients may depend on the server-defined preset ordering.
 - Additive changes should be preferred over renaming, reordering, or removing these fields.
 
-### `GET /agent/brain` contract
+### `POST /agent/brain` contract
 
 `/agent/brain` is a lightweight, deterministic local operational summary endpoint for downstream clients that need a concise server briefing plus machine-readable change signals.
 
@@ -90,7 +90,7 @@ Current point-in-time summary fields:
 
 - `status`: high-level endpoint status string.
 - `overall_status`: aggregated current operational status.
-- `summary`: concise current snapshot of server state.
+- `summary`: structured current snapshot of server state (`gateway`, optional disk/memory/load/uptime, optional `service_states`, optional `docker_summary`).
 - `message_lines`: short Korean human-readable briefing lines for quick operator context.
 
 Additive change fields:
@@ -109,18 +109,34 @@ Example response shape:
 ```json
 {
   "status": "ok",
-  "overall_status": "healthy",
-  "summary": "모든 핵심 컴포넌트가 정상 동작 중입니다.",
+  "overall_status": "warning",
+  "summary": {
+    "gateway": "degraded",
+    "disk_percent": 78.4,
+    "memory_percent": 91.2,
+    "load_average": [1.23, 0.98, 0.76],
+    "uptime_seconds": 86400.0,
+    "service_states": {
+      "ai-gateway": "failed",
+      "telegram-bot": "active"
+    },
+    "docker_summary": {
+      "running": 1,
+      "stopped": 2
+    }
+  },
   "message_lines": [
-    "현재 트래픽은 안정적입니다.",
-    "upstream 연결 상태가 양호합니다."
+    "ai-gateway 주의",
+    "경고: ai-gateway 상태 active→failed."
   ],
   "has_notable_changes": true,
   "changes": [
     {
-      "type": "upstream_status_changed",
-      "from": "degraded",
-      "to": "healthy"
+      "kind": "service_state_change",
+      "field": "service_states.ai-gateway",
+      "previous": "active",
+      "current": "failed",
+      "notable": true
     }
   ]
 }
