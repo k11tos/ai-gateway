@@ -38,11 +38,115 @@ def test_metric_memory_decrease_is_non_notable():
     assert changes['has_notable_changes'] is False
 
 
-def test_metric_memory_increase_is_notable():
+def test_small_memory_increase_is_non_notable():
     changes = format_agent_brain_changes(
         _change_set(
             metric_deltas=[
-                SimpleNamespace(name='memory_percent', previous=43.4, current=48.9),
+                SimpleNamespace(name='memory_percent', previous=43.4, current=43.5),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is False
+    assert changes['has_notable_changes'] is False
+
+
+def test_meaningful_memory_increase_is_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='memory_percent', previous=43.4, current=48.4),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is True
+    assert changes['has_notable_changes'] is True
+
+
+def test_memory_warning_threshold_crossing_is_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='memory_percent', previous=89.9, current=90.1),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is True
+    assert changes['has_notable_changes'] is True
+
+
+def test_disk_decrease_is_non_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='disk_percent', previous=61.0, current=58.0),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is False
+    assert changes['has_notable_changes'] is False
+
+
+def test_small_disk_increase_is_non_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='disk_percent', previous=61.0, current=61.2),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is False
+    assert changes['has_notable_changes'] is False
+
+
+def test_meaningful_disk_increase_is_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='disk_percent', previous=61.0, current=66.0),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is True
+    assert changes['has_notable_changes'] is True
+
+
+def test_load_average_decrease_is_non_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='load_average', previous=0.40, current=0.20),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is False
+    assert changes['has_notable_changes'] is False
+
+
+def test_small_load_average_increase_is_non_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='load_average', previous=0.32, current=0.34),
+            ]
+        )
+    )
+
+    assert changes['changes'][0]['notable'] is False
+    assert changes['has_notable_changes'] is False
+
+
+def test_meaningful_load_average_increase_is_notable():
+    changes = format_agent_brain_changes(
+        _change_set(
+            metric_deltas=[
+                SimpleNamespace(name='load_average', previous=0.32, current=0.83),
             ]
         )
     )

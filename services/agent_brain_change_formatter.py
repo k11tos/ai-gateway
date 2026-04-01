@@ -3,6 +3,8 @@ from typing import Protocol
 from typing import TypedDict
 
 WARNING_THRESHOLD_PERCENT = 90.0
+RESOURCE_NOTABLE_WORSENING_THRESHOLD_PERCENT = 5.0
+LOAD_AVERAGE_NOTABLE_WORSENING_THRESHOLD = 0.5
 
 
 class AgentBrainChangeLike(TypedDict):
@@ -125,13 +127,15 @@ def format_agent_brain_changes(change_set: AgentBrainChangeSetLike) -> AgentBrai
 
 
 def _is_notable_metric_delta(delta: MetricDeltaLike) -> bool:
+    increase = delta.current - delta.previous
+
     if delta.name in {'disk_percent', 'memory_percent'}:
-        worsened = delta.current > delta.previous
+        worsened = increase >= RESOURCE_NOTABLE_WORSENING_THRESHOLD_PERCENT
         entered_warning = delta.current >= WARNING_THRESHOLD_PERCENT and delta.previous < WARNING_THRESHOLD_PERCENT
         return worsened or entered_warning
 
     if delta.name == 'load_average':
-        return delta.current > delta.previous
+        return increase >= LOAD_AVERAGE_NOTABLE_WORSENING_THRESHOLD
 
     return True
 
