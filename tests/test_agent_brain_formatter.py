@@ -224,3 +224,39 @@ def test_format_agent_brain_summary_adds_concise_docker_change_line():
     presentation = format_agent_brain_summary(summary, changes)
 
     assert presentation['message_lines'][-1] == 'Docker 변화: 실행 2→1, 중지 1→2.'
+
+
+def test_format_agent_brain_summary_ignores_non_notable_change_lines():
+    summary = SimpleNamespace(
+        gateway='ok',
+        disk_percent=50.0,
+        memory_percent=40.0,
+        load_average=[0.10, 0.20, 0.30],
+        uptime_seconds=120.0,
+        service_states={'ai-gateway': 'failed', 'telegram-bot': 'active'},
+        docker_summary={'running': 2, 'stopped': 0},
+    )
+    changes = {
+        'has_notable_changes': True,
+        'changes': [
+            {
+                'kind': 'service_state_change',
+                'field': 'service_states.ai-gateway',
+                'previous': 'active',
+                'current': 'failed',
+                'notable': True,
+            },
+            {
+                'kind': 'metric_delta',
+                'field': 'memory_percent',
+                'previous': 48.9,
+                'current': 43.4,
+                'notable': False,
+            },
+        ],
+    }
+
+    presentation = format_agent_brain_summary(summary, changes)
+
+    assert presentation['message_lines'][-1] == '경고: ai-gateway 상태 active→failed.'
+    assert all('48.9%→43.4%' not in line for line in presentation['message_lines'])
