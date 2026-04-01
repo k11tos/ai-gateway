@@ -121,6 +121,9 @@ def _change_lines(changes: AgentBrainChangesPresentationLike | None) -> list[str
     other_metric_lines = []
 
     for change in change_items:
+        if not change.get('notable', False):
+            continue
+
         kind = change['kind']
         if kind == 'restart_detected':
             restart_lines.append('가동 시간이 급감해 재시작이 의심됩니다.')
