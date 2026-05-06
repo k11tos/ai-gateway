@@ -32,7 +32,6 @@ jobs:
     env:
       PI_HOST: ${{ secrets.PI_HOST }}
       PI_USER: ${{ secrets.PI_USER }}
-      PI_PORT: ${{ secrets.PI_PORT }}
       PI_APP_DIR: ${{ secrets.PI_APP_DIR }}
 
     steps:
@@ -60,13 +59,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          port="${PI_PORT:-22}"
-
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           touch ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-          ssh-keyscan -p "${port}" -H "${PI_HOST}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${PI_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Tailscale diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale status
+          tailscale ip -4
 
       - name: Compute deploy version metadata
         id: version_meta
@@ -88,19 +99,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          port="${PI_PORT:-22}"
-          app_dir="${{ inputs.app_dir }}"
-          if [[ -z "${app_dir}" ]]; then
-            app_dir="${PI_APP_DIR:-}"
+          target_dir="${{ inputs.app_dir }}"
+          if [[ -z "${target_dir}" ]]; then
+            target_dir="${PI_APP_DIR:-}"
           fi
 
-          if [[ -z "${app_dir}" ]]; then
-            echo "APP_DIR is required. Provide workflow input app_dir or set PI_APP_DIR secret." >&2
+          if [[ -z "${target_dir}" ]]; then
+            echo "TARGET_DIR is required. Provide workflow input app_dir or set PI_APP_DIR secret." >&2
             exit 1
           fi
 
-          ssh -p "${port}" "${PI_USER}@${PI_HOST}" \
-            "APP_DIR=$(printf %q "${app_dir}") \
+          timeout 10m ssh \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            "${PI_USER}@${PI_HOST}" \
+            "TARGET_DIR=$(printf %q "${target_dir}") bash -s" <<'EOF'
+          set -euo pipefail
+          test -d "$TARGET_DIR" || { echo "Deployment target directory is missing"; exit 1; }
+          cd "$TARGET_DIR"
+
+          test -d .git || { echo "Deployment target is not a git repository"; exit 1; }
+          echo "Git deployment target verified"
+          EOF
+
+          timeout 10m ssh \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            "${PI_USER}@${PI_HOST}" \
+            "APP_DIR=$(printf %q "${target_dir}") \
              SERVICE_NAME=$(printf %q "${{ inputs.service_name }}") \
              HEALTH_URL=$(printf %q "${{ inputs.health_url }}") \
              BRANCH=$(printf %q "${{ inputs.branch }}") \
@@ -108,3 +136,14 @@ jobs:
              APP_VERSION=$(printf %q "${{ steps.version_meta.outputs.app_version }}") \
              COMMIT_SHA=$(printf %q "${{ steps.version_meta.outputs.full_sha }}") \
              bash -s" < scripts/deploy.sh
+
+      - name: Post-deploy container status
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 5m ssh \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            "${PI_USER}@${PI_HOST}" \
+            'if command -v docker >/dev/null 2>&1; then docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"; else echo "Docker is not installed; skipping container status"; fi'
