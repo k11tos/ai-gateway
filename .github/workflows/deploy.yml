@@ -32,7 +32,7 @@ jobs:
     env:
       PI_HOST: ${{ secrets.PI_HOST }}
       PI_USER: ${{ secrets.PI_USER }}
-      PI_APP_DIR: ${{ secrets.PI_APP_DIR }}
+      TARGET_DIR: ${{ secrets.PI_APP_DIR }}
 
     steps:
       - name: Checkout repository
@@ -46,7 +46,7 @@ jobs:
           [[ -n "${PI_USER:-}" ]] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
           [[ -n "${{ secrets.PI_SSH_KEY }}" ]] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
           if [[ -z "${{ inputs.app_dir }}" ]]; then
-            [[ -n "${PI_APP_DIR:-}" ]] || { echo "Missing required secret: PI_APP_DIR (or provide app_dir input)" >&2; exit 1; }
+            [[ -n "${TARGET_DIR:-}" ]] || { echo "Missing required secret: PI_APP_DIR (or provide app_dir input)" >&2; exit 1; }
           fi
 
       - name: Start SSH agent
@@ -99,12 +99,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          target_dir="${{ inputs.app_dir }}"
-          if [[ -z "${target_dir}" ]]; then
-            target_dir="${PI_APP_DIR:-}"
+          TARGET_DIR_INPUT="${{ inputs.app_dir }}"
+          if [[ -n "${TARGET_DIR_INPUT}" ]]; then
+            TARGET_DIR="${TARGET_DIR_INPUT}"
           fi
 
-          if [[ -z "${target_dir}" ]]; then
+          if [[ -z "${TARGET_DIR:-}" ]]; then
             echo "TARGET_DIR is required. Provide workflow input app_dir or set PI_APP_DIR secret." >&2
             exit 1
           fi
@@ -114,7 +114,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=3 \
             "${PI_USER}@${PI_HOST}" \
-            "TARGET_DIR=$(printf %q "${target_dir}") bash -s" <<'EOF'
+            "TARGET_DIR=$(printf %q "${TARGET_DIR}") bash -s" <<'EOF'
           set -euo pipefail
           test -d "$TARGET_DIR" || { echo "Deployment target directory is missing"; exit 1; }
           cd "$TARGET_DIR"
@@ -128,7 +128,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=3 \
             "${PI_USER}@${PI_HOST}" \
-            "APP_DIR=$(printf %q "${target_dir}") \
+            "APP_DIR=$(printf %q "${TARGET_DIR}") \
              SERVICE_NAME=$(printf %q "${{ inputs.service_name }}") \
              HEALTH_URL=$(printf %q "${{ inputs.health_url }}") \
              BRANCH=$(printf %q "${{ inputs.branch }}") \
