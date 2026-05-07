@@ -63,7 +63,6 @@ jobs:
           chmod 700 ~/.ssh
           touch ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-          ssh-keyscan -H "${PI_HOST}" >> ~/.ssh/known_hosts
 
       - name: Connect to Tailscale
         uses: tailscale/github-action@v4
@@ -78,6 +77,13 @@ jobs:
           set -euo pipefail
           tailscale status
           tailscale ip -4
+
+
+      - name: Add Raspberry Pi host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${PI_HOST}" >> ~/.ssh/known_hosts
 
       - name: Compute deploy version metadata
         id: version_meta
