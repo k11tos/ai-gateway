@@ -1,7 +1,6 @@
 import json
 import os
 import time
-from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -9,12 +8,6 @@ from fastapi import Request
 from fastapi import Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from pydantic import Field
-from services.agent_brain_change_detector import detect_agent_brain_changes
-from services.agent_brain_change_formatter import format_agent_brain_changes
-from services.agent_brain_formatter import format_agent_brain_summary
-from services.agent_brain_snapshot_store import agent_brain_snapshot_store
-from services.agent_brain_status_service import collect_local_server_status
 from services.non_stream_request_flow import (
     prepare_non_stream_request_metadata,
     run_non_stream_generation,
@@ -124,38 +117,6 @@ class ChatRequest(BaseModel):
     # The gateway is responsible for applying preset prompt shaping.
     preset: str | None = None
     provider: str | None = None
-
-
-class AgentBrainSummary(BaseModel):
-    gateway: str
-    disk_percent: float | None = None
-    memory_percent: float | None = None
-    load_average: list[float] | None = None
-    uptime_seconds: float | None = None
-    service_states: dict[str, str | None] | None = None
-    docker_summary: dict[str, int] | None = None
-
-
-class AgentBrainChange(BaseModel):
-    kind: Literal[
-        "metric_delta",
-        "service_state_change",
-        "docker_summary_change",
-        "restart_detected",
-    ]
-    field: str
-    previous: float | int | str | None | dict[str, int]
-    current: float | int | str | None | dict[str, int]
-    notable: bool = True
-
-
-class AgentBrainResponse(BaseModel):
-    status: Literal["ok"] = "ok"
-    overall_status: Literal["ok", "partial", "warning"]
-    summary: AgentBrainSummary
-    message_lines: list[str]
-    has_notable_changes: bool = False
-    changes: list[AgentBrainChange] = Field(default_factory=list)
 
 
 def _resolve_model_for_request(
@@ -332,37 +293,6 @@ class AppOperationalRouterDependencies:
     @property
     def DEFAULT_PROVIDER(self) -> str:
         return DEFAULT_PROVIDER
-
-    @property
-    def AgentBrainResponse(self):
-        return AgentBrainResponse
-
-    def collect_local_server_status(self) -> dict[str, object]:
-        return collect_local_server_status()
-
-    @property
-    def AgentBrainSummary(self):
-        return AgentBrainSummary
-
-    def format_agent_brain_summary(
-        self,
-        summary: AgentBrainSummary,
-        changes: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        return format_agent_brain_summary(summary, changes)
-
-    def detect_agent_brain_changes(self, previous_snapshot, current_snapshot):
-        return detect_agent_brain_changes(previous_snapshot, current_snapshot)
-
-    def format_agent_brain_changes(self, change_set) -> dict[str, object]:
-        return format_agent_brain_changes(change_set)
-
-    def get_previous_agent_brain_snapshot(self):
-        return agent_brain_snapshot_store.get_last_snapshot()
-
-    def set_latest_agent_brain_snapshot(self, snapshot) -> None:
-        agent_brain_snapshot_store.set_last_snapshot(snapshot)
-
 
 operational_router_dependencies: OperationalRouterDependencies = AppOperationalRouterDependencies()
 app.include_router(create_operational_router(operational_router_dependencies))
