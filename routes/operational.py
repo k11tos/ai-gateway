@@ -25,14 +25,6 @@ class OperationalRouterDependencies(Protocol):
     RETRY_COUNT: int
     SUPPORTED_PROVIDERS: tuple[str, ...]
     DEFAULT_PROVIDER: str
-    AgentBrainResponse: Any
-    def collect_local_server_status(self) -> dict[str, Any]: ...
-    AgentBrainSummary: Any
-    def format_agent_brain_summary(self, summary: Any, changes: Any | None = None) -> dict[str, Any]: ...
-    def detect_agent_brain_changes(self, previous_snapshot: Any, current_snapshot: Any) -> Any: ...
-    def format_agent_brain_changes(self, change_set: Any) -> dict[str, Any]: ...
-    def get_previous_agent_brain_snapshot(self) -> Any: ...
-    def set_latest_agent_brain_snapshot(self, snapshot: Any) -> None: ...
 
 
 def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
@@ -174,46 +166,5 @@ def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
             "supported_providers": list(deps.SUPPORTED_PROVIDERS),
             "default_provider": deps.DEFAULT_PROVIDER,
         }
-
-    @router.post("/agent/brain", response_model=deps.AgentBrainResponse)
-    def agent_brain(request: Request, response: Response):
-        start = time.perf_counter()
-        request_id = deps._request_id(request)
-
-        deps._log_request_event("start", "/agent/brain", request_id)
-
-        raw_status = deps.collect_local_server_status()
-        summary = deps.AgentBrainSummary(
-            gateway=raw_status["gateway"],
-            disk_percent=raw_status["disk_percent"],
-            memory_percent=raw_status["memory_percent"],
-            load_average=raw_status["load_average"],
-            uptime_seconds=raw_status["uptime_seconds"],
-            service_states=raw_status["service_states"],
-            docker_summary=raw_status["docker_summary"],
-        )
-        previous_snapshot = deps.get_previous_agent_brain_snapshot()
-        current_snapshot = summary
-        change_set = deps.detect_agent_brain_changes(previous_snapshot, current_snapshot)
-        change_presentation = deps.format_agent_brain_changes(change_set)
-        deps.set_latest_agent_brain_snapshot(current_snapshot)
-        presentation = deps.format_agent_brain_summary(summary, change_presentation)
-
-        response.headers["X-Request-Id"] = request_id
-        deps._log_request_event(
-            "complete",
-            "/agent/brain",
-            request_id,
-            outcome=deps.OUTCOME_SUCCESS,
-            latency_ms=deps._latency_ms(start),
-        )
-
-        return deps.AgentBrainResponse(
-            overall_status=presentation["overall_status"],
-            summary=summary,
-            message_lines=presentation["message_lines"],
-            has_notable_changes=change_presentation["has_notable_changes"],
-            changes=change_presentation["changes"],
-        )
 
     return router
