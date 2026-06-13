@@ -32,6 +32,7 @@ from routes.operational import (
     OperationalRouterDependencies,
     create_operational_router,
 )
+from routes.obsidian import create_obsidian_router
 from ollama_client import (
     OLLAMA_BASE_URL,
     LEGACY_REQUEST_TIMEOUT,
@@ -296,6 +297,7 @@ class AppOperationalRouterDependencies:
 
 operational_router_dependencies: OperationalRouterDependencies = AppOperationalRouterDependencies()
 app.include_router(create_operational_router(operational_router_dependencies))
+app.include_router(create_obsidian_router())
 
 
 @app.post("/chat")
