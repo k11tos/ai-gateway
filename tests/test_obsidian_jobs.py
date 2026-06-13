@@ -19,7 +19,7 @@ def obsidian_client(tmp_path, monkeypatch):
     monkeypatch.setenv("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN", TELEGRAM_TOKEN)
     monkeypatch.setenv("OBSIDIAN_WORKER_TOKEN", WORKER_TOKEN)
     api = FastAPI()
-    api.include_router(create_obsidian_router(ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))))
+    api.include_router(create_obsidian_router(lambda: ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))))
     return TestClient(api)
 
 
@@ -98,6 +98,7 @@ def test_claimed_job_becomes_running(obsidian_client):
 
 def test_result_update_stores_succeeded_result(obsidian_client):
     job_id = create_job(obsidian_client)
+    obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
 
     response = obsidian_client.post(
         f"/obsidian/jobs/{job_id}/result",
@@ -114,6 +115,7 @@ def test_result_update_stores_succeeded_result(obsidian_client):
 
 def test_result_update_stores_failed_error(obsidian_client):
     job_id = create_job(obsidian_client)
+    obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
 
     response = obsidian_client.post(
         f"/obsidian/jobs/{job_id}/result",
@@ -133,3 +135,28 @@ def test_empty_queue_returns_clear_empty_response(obsidian_client):
 
     assert response.status_code == 200
     assert response.json() == {"job": None, "status": "empty"}
+
+
+def test_second_result_call_does_not_overwrite_final_job(obsidian_client):
+    job_id = create_job(obsidian_client)
+    obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
+
+    first_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "original answer"},
+    )
+    second_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "failed", "error_text": "stale failure"},
+    )
+    get_response = obsidian_client.get(f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN))
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 409
+    assert get_response.status_code == 200
+    body = get_response.json()
+    assert body["status"] == "succeeded"
+    assert body["result_text"] == "original answer"
+    assert body["error_text"] is None

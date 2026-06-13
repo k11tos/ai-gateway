@@ -33,7 +33,6 @@ from routes.operational import (
     create_operational_router,
 )
 from routes.obsidian import create_obsidian_router
-from services.obsidian_jobs import ObsidianJobStore
 from ollama_client import (
     OLLAMA_BASE_URL,
     LEGACY_REQUEST_TIMEOUT,
@@ -110,13 +109,6 @@ def _load_model_aliases() -> dict[str, str]:
 MODEL_ALIASES = _load_model_aliases()
 
 app = FastAPI(title="AI Gateway")
-
-
-def _obsidian_db_path() -> str:
-    return os.environ.get("OBSIDIAN_JOBS_DB_PATH", "data/obsidian_jobs.sqlite3")
-
-
-obsidian_job_store = ObsidianJobStore(_obsidian_db_path())
 
 
 class ChatRequest(BaseModel):
@@ -305,7 +297,7 @@ class AppOperationalRouterDependencies:
 
 operational_router_dependencies: OperationalRouterDependencies = AppOperationalRouterDependencies()
 app.include_router(create_operational_router(operational_router_dependencies))
-app.include_router(create_obsidian_router(obsidian_job_store))
+app.include_router(create_obsidian_router())
 
 
 @app.post("/chat")

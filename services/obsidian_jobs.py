@@ -14,6 +14,10 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class JobTransitionConflict(Exception):
+    pass
+
+
 class ObsidianJobStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -126,12 +130,19 @@ class ObsidianJobStore:
                 """
                 UPDATE obsidian_jobs
                 SET status = ?, result_text = ?, error_text = ?, finished_at = ?
-                WHERE id = ?
+                WHERE id = ? AND status = 'running'
                 """,
                 (status, result_text, error_text, finished_at, job_id),
             )
             if cursor.rowcount == 0:
-                return None
+                existing = conn.execute(
+                    "SELECT * FROM obsidian_jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                if existing is None:
+                    return None
+                raise JobTransitionConflict(
+                    f"job {job_id} cannot transition from {existing['status']} to {status}"
+                )
         return self.get_job(job_id)
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
