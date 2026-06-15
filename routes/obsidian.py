@@ -79,6 +79,24 @@ def _log_job_event(event: str, *, request_id: str | None, job: dict[str, Any]) -
     )
 
 
+def _get_job_or_404(store: ObsidianJobStore, job_id: str) -> dict[str, Any]:
+    job = store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+def _job_result_response(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "job_id": job["job_id"],
+        "command": job["command"],
+        "status": job["status"],
+        "result_text": job["result_text"],
+        "error_text": job["error_text"],
+        "finished_at": job["finished_at"],
+    }
+
+
 def create_obsidian_router(
     store_provider: Callable[[], ObsidianJobStore] = default_obsidian_job_store_provider,
 ) -> APIRouter:
@@ -145,10 +163,12 @@ def create_obsidian_router(
     @router.get("/jobs/{job_id}")
     def get_job(job_id: str, authorization: str | None = Header(default=None)):
         _require_token(authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"))
-        job = store_provider().get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job not found")
-        return job
+        return _get_job_or_404(store_provider(), job_id)
+
+    @router.get("/jobs/{job_id}/result")
+    def get_job_result(job_id: str, authorization: str | None = Header(default=None)):
+        _require_token(authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"))
+        return _job_result_response(_get_job_or_404(store_provider(), job_id))
 
     @router.get("/status")
     def status(authorization: str | None = Header(default=None)):

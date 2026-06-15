@@ -96,6 +96,19 @@ def test_claimed_job_becomes_running(obsidian_client):
     assert get_response.json()["locked_at"] is not None
 
 
+def test_get_job_works_with_telegram_token(obsidian_client):
+    job_id = create_job(obsidian_client, payload={"question": "status?"})
+
+    response = obsidian_client.get(f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_id"] == job_id
+    assert body["command"] == "ask"
+    assert body["payload"] == {"question": "status?"}
+    assert body["status"] == "queued"
+
+
 def test_result_update_stores_succeeded_result(obsidian_client):
     job_id = create_job(obsidian_client)
     obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
@@ -111,6 +124,57 @@ def test_result_update_stores_succeeded_result(obsidian_client):
     assert body["status"] == "succeeded"
     assert body["result_text"] == "answer"
     assert body["finished_at"] is not None
+
+
+def test_get_result_alias_returns_succeeded_result_text(obsidian_client):
+    job_id = create_job(obsidian_client)
+    obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
+    update_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "answer"},
+    )
+
+    response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(TELEGRAM_TOKEN),
+    )
+
+    assert update_response.status_code == 200
+    assert response.status_code == 200
+    assert response.json() == {
+        "job_id": job_id,
+        "command": "ask",
+        "status": "succeeded",
+        "result_text": "answer",
+        "error_text": None,
+        "finished_at": update_response.json()["finished_at"],
+    }
+
+
+def test_get_result_alias_rejects_missing_auth(obsidian_client):
+    job_id = create_job(obsidian_client)
+
+    response = obsidian_client.get(f"/obsidian/jobs/{job_id}/result")
+
+    assert response.status_code == 401
+
+
+def test_get_result_alias_rejects_worker_token(obsidian_client):
+    job_id = create_job(obsidian_client)
+
+    response = obsidian_client.get(f"/obsidian/jobs/{job_id}/result", headers=auth(WORKER_TOKEN))
+
+    assert response.status_code == 401
+
+
+def test_get_result_alias_returns_404_for_unknown_job(obsidian_client):
+    response = obsidian_client.get(
+        "/obsidian/jobs/unknown/result",
+        headers=auth(TELEGRAM_TOKEN),
+    )
+
+    assert response.status_code == 404
 
 
 def test_result_update_stores_failed_error(obsidian_client):
