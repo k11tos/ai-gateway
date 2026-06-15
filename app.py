@@ -183,11 +183,39 @@ def _adapter_for_provider(provider: str) -> ProviderAdapter:
         ) from e
 
 
+def _validate_non_blank_provider_response(
+    response,
+    *,
+    endpoint: str,
+    request_id: str | None,
+    requested_model: str,
+    resolved_model: str,
+) -> str:
+    if not isinstance(response, str) or not response.strip():
+        logger.warning(
+            "upstream_invalid_response "
+            f"endpoint={endpoint} "
+            f"request_id={request_id} "
+            f"requested_model={requested_model} "
+            f"resolved_model={resolved_model} "
+            "reason=empty_response"
+        )
+        headers = {"X-Request-Id": request_id} if request_id else None
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid upstream response: empty response",
+            headers=headers,
+        )
+
+    return response
+
+
 def _generate_response(
     prompt: str,
     requested_model: str,
     resolved_model: str,
     provider: str,
+    endpoint: str,
     provider_adapter: ProviderAdapter,
     request_id: str | None = None,
 ):
@@ -204,6 +232,14 @@ def _generate_response(
         )
         headers = {"X-Request-Id": request_id} if request_id else None
         raise HTTPException(status_code=502, detail=str(e), headers=headers) from e
+
+    response = _validate_non_blank_provider_response(
+        response,
+        endpoint=endpoint,
+        request_id=request_id,
+        requested_model=requested_model,
+        resolved_model=resolved_model,
+    )
 
     payload = {"provider": provider, "model": requested_model, "response": response}
     if requested_model != resolved_model:
@@ -334,6 +370,7 @@ def chat(req: ChatRequest, request: Request, response: Response):
             requested_model=metadata.requested_model,
             resolved_model=metadata.resolved_model,
             provider=resolved_provider,
+            endpoint="/chat",
             request_id=request_id,
             apply_prompt_preset=_apply_gateway_prompt_preset,
             generate_response=_generate_response,
@@ -444,6 +481,7 @@ def generate_api(req: ChatRequest, request: Request, response: Response):
             requested_model=metadata.requested_model,
             resolved_model=metadata.resolved_model,
             provider=resolved_provider,
+            endpoint="/generate",
             request_id=request_id,
             apply_prompt_preset=_apply_gateway_prompt_preset,
             generate_response=_generate_response,
@@ -558,6 +596,7 @@ def _stream_with_completion_logging(
     *,
     request_id: str,
     requested_model: str,
+    resolved_model: str,
     normalized_preset: str | None,
     observed_provider: str,
     start: float,
@@ -569,6 +608,8 @@ def _stream_with_completion_logging(
         stream_completed = yield from _normalize_upstream_stream_events(
             upstream_generator,
             request_id=request_id,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
         )
         if not stream_completed:
             outcome = OUTCOME_INCOMPLETE
@@ -670,6 +711,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             upstream_generator,
             request_id=request_id,
             requested_model=stream_metadata["requested_model"],
+            resolved_model=stream_metadata["resolved_model"],
             normalized_preset=stream_metadata["normalized_preset"],
             observed_provider=stream_metadata["observed_provider"],
             start=start,
@@ -681,8 +723,14 @@ def generate_stream_api(req: ChatRequest, request: Request):
     return response
 
 
-def _normalize_upstream_stream_events(upstream_generator, request_id: str | None = None):
+def _normalize_upstream_stream_events(
+    upstream_generator,
+    request_id: str | None = None,
+    requested_model: str | None = None,
+    resolved_model: str | None = None,
+):
     done_emitted = False
+    content_seen = False
 
     for raw_line in upstream_generator:
         line = raw_line.strip()
@@ -706,10 +754,25 @@ def _normalize_upstream_stream_events(upstream_generator, request_id: str | None
 
         chunk = event.get("response")
 
-        if isinstance(chunk, str) and chunk:
-            yield json.dumps({"response": chunk, "done": False}) + "\n"
+        if isinstance(chunk, str):
+            chunk_has_content = bool(chunk.strip())
+            if chunk_has_content:
+                content_seen = True
+
+            should_emit = bool(chunk) and (chunk_has_content or content_seen)
+            if should_emit:
+                yield json.dumps({"response": chunk, "done": False}) + "\n"
 
         if event.get("done") is True:
+            if not content_seen:
+                logger.warning(
+                    "stream_empty_response "
+                    "endpoint=/generate_stream "
+                    f"request_id={request_id} "
+                    f"requested_model={requested_model} "
+                    f"resolved_model={resolved_model} "
+                    "reason=empty_response"
+                )
             yield json.dumps({"done": True}) + "\n"
             done_emitted = True
             break

@@ -704,3 +704,50 @@ def test_load_model_aliases_ignores_malformed_and_empty_csv_entries(monkeypatch,
         "model_alias_config_invalid_empty_alias pair==missing-alias" in message
         for message in messages
     )
+
+
+def test_chat_returns_502_when_provider_returns_empty_response(client, monkeypatch, caplog):
+    caplog.set_level("WARNING", logger="ai_gateway")
+    monkeypatch.setattr(app, "generate", lambda prompt, model: "")
+
+    response = client.post(
+        "/chat",
+        headers={"X-Request-Id": "empty-chat-1"},
+        json={"prompt": "hello"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Invalid upstream response: empty response"}
+    assert "upstream_invalid_response endpoint=/chat" in caplog.text
+    assert "request_id=empty-chat-1" in caplog.text
+    assert f"requested_model={app.DEFAULT_MODEL}" in caplog.text
+    assert f"resolved_model={app.DEFAULT_MODEL}" in caplog.text
+    assert "reason=empty_response" in caplog.text
+    assert "hello" not in caplog.text
+
+
+def test_chat_returns_502_when_provider_returns_whitespace_response(client, monkeypatch, caplog):
+    caplog.set_level("WARNING", logger="ai_gateway")
+    monkeypatch.setattr(app, "generate", lambda prompt, model: " \n\t ")
+
+    response = client.post(
+        "/chat",
+        headers={"X-Request-Id": "blank-chat-1"},
+        json={"prompt": "secret-prompt"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Invalid upstream response: empty response"}
+    assert "upstream_invalid_response endpoint=/chat" in caplog.text
+    assert "request_id=blank-chat-1" in caplog.text
+    assert "reason=empty_response" in caplog.text
+    assert "secret-prompt" not in caplog.text
+
+
+def test_chat_still_returns_200_for_normal_provider_response(client, monkeypatch):
+    monkeypatch.setattr(app, "generate", lambda prompt, model: "normal response")
+
+    response = client.post("/chat", json={"prompt": "hello"})
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "normal response"

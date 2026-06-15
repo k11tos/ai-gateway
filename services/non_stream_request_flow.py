@@ -47,6 +47,7 @@ def run_non_stream_generation(
     requested_model: str,
     resolved_model: str,
     provider: str,
+    endpoint: str,
     request_id: str,
     apply_prompt_preset: Callable[[str, str | None], str],
     generate_response: Callable[..., dict],
@@ -58,6 +59,7 @@ def run_non_stream_generation(
         requested_model=requested_model,
         resolved_model=resolved_model,
         provider=provider,
+        endpoint=endpoint,
         provider_adapter=provider_adapter,
         request_id=request_id,
     )
