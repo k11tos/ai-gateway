@@ -730,7 +730,7 @@ def _normalize_upstream_stream_events(
     resolved_model: str | None = None,
 ):
     done_emitted = False
-    content_emitted = False
+    content_seen = False
 
     for raw_line in upstream_generator:
         line = raw_line.strip()
@@ -754,12 +754,17 @@ def _normalize_upstream_stream_events(
 
         chunk = event.get("response")
 
-        if isinstance(chunk, str) and chunk.strip():
-            content_emitted = True
-            yield json.dumps({"response": chunk, "done": False}) + "\n"
+        if isinstance(chunk, str):
+            chunk_has_content = bool(chunk.strip())
+            if chunk_has_content:
+                content_seen = True
+
+            should_emit = bool(chunk) and (chunk_has_content or content_seen)
+            if should_emit:
+                yield json.dumps({"response": chunk, "done": False}) + "\n"
 
         if event.get("done") is True:
-            if not content_emitted:
+            if not content_seen:
                 logger.warning(
                     "stream_empty_response "
                     "endpoint=/generate_stream "
