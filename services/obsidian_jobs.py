@@ -1,17 +1,37 @@
 import json
+import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 ALLOWED_COMMANDS = {"ask", "ingest", "capture", "draft", "status"}
 FINAL_STATUSES = {"succeeded", "failed"}
 ALL_STATUSES = {"queued", "running", "succeeded", "failed", "expired"}
+TRUNCATION_MARKER = "...[truncated by ai-gateway]"
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _read_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value == "":
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
+def _truncate_text(value: str | None, max_chars: int) -> str | None:
+    if value is None or max_chars < 0 or len(value) <= max_chars:
+        return value
+    if max_chars <= len(TRUNCATION_MARKER):
+        return TRUNCATION_MARKER[:max_chars]
+    return f"{value[: max_chars - len(TRUNCATION_MARKER)]}{TRUNCATION_MARKER}"
 
 
 class JobTransitionConflict(Exception):
@@ -21,6 +41,14 @@ class JobTransitionConflict(Exception):
 class ObsidianJobStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self.result_retention_hours = _read_int_env(
+            "OBSIDIAN_JOB_RESULT_RETENTION_HOURS", 24
+        )
+        self.error_retention_hours = _read_int_env(
+            "OBSIDIAN_JOB_ERROR_RETENTION_HOURS", 72
+        )
+        self.max_result_chars = _read_int_env("OBSIDIAN_JOB_MAX_RESULT_CHARS", 20000)
+        self.max_error_chars = _read_int_env("OBSIDIAN_JOB_MAX_ERROR_CHARS", 4000)
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -34,8 +62,7 @@ class ObsidianJobStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS obsidian_jobs (
                     id text primary key,
                     command text not null,
@@ -50,8 +77,7 @@ class ObsidianJobStore:
                     locked_at text nullable,
                     finished_at text nullable
                 )
-                """
-            )
+                """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_queue "
                 "ON obsidian_jobs(status, created_at)"
@@ -70,6 +96,7 @@ class ObsidianJobStore:
         telegram_message_id: int | None,
         requested_by: int | None,
     ) -> dict[str, Any]:
+        self.cleanup_obsidian_job_payloads()
         job_id = uuid.uuid4().hex
         created_at = utc_now_iso()
         with self._connect() as conn:
@@ -96,14 +123,12 @@ class ObsidianJobStore:
         locked_at = utc_now_iso()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                """
+            row = conn.execute("""
                 SELECT * FROM obsidian_jobs
                 WHERE status = 'queued'
                 ORDER BY created_at ASC
                 LIMIT 1
-                """
-            ).fetchone()
+                """).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -125,6 +150,8 @@ class ObsidianJobStore:
         error_text: str | None,
     ) -> dict[str, Any] | None:
         finished_at = utc_now_iso()
+        result_text = _truncate_text(result_text, self.max_result_chars)
+        error_text = _truncate_text(error_text, self.max_error_chars)
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -145,28 +172,69 @@ class ObsidianJobStore:
                 )
         return self.get_job(job_id)
 
+    def cleanup_obsidian_job_payloads(
+        self, now: datetime | None = None
+    ) -> dict[str, int]:
+        now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        result_cutoff = (now - timedelta(hours=self.result_retention_hours)).isoformat()
+        error_cutoff = (now - timedelta(hours=self.error_retention_hours)).isoformat()
+        with self._connect() as conn:
+            result_cursor = conn.execute(
+                """
+                UPDATE obsidian_jobs
+                SET result_text = NULL
+                WHERE status = 'succeeded'
+                  AND result_text IS NOT NULL
+                  AND finished_at IS NOT NULL
+                  AND finished_at < ?
+                """,
+                (result_cutoff,),
+            )
+            error_cursor = conn.execute(
+                """
+                UPDATE obsidian_jobs
+                SET error_text = NULL
+                WHERE status = 'failed'
+                  AND error_text IS NOT NULL
+                  AND finished_at IS NOT NULL
+                  AND finished_at < ?
+                """,
+                (error_cutoff,),
+            )
+        return {
+            "result_text_cleared": result_cursor.rowcount,
+            "error_text_cleared": error_cursor.rowcount,
+        }
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM obsidian_jobs WHERE id = ?", (job_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM obsidian_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
         return row_to_job(row) if row else None
 
     def status_summary(self) -> dict[str, Any]:
+        cleanup_counts = self.cleanup_obsidian_job_payloads()
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT status, COUNT(*) AS count FROM obsidian_jobs GROUP BY status"
             ).fetchall()
-            last = conn.execute(
-                """
+            last = conn.execute("""
                 SELECT id, command, status, finished_at, error_text
                 FROM obsidian_jobs
                 WHERE finished_at IS NOT NULL
                 ORDER BY finished_at DESC
                 LIMIT 1
-                """
-            ).fetchone()
+                """).fetchone()
         counts = {status: 0 for status in ALL_STATUSES}
         counts.update({row["status"]: row["count"] for row in rows})
-        return {"queue_counts": counts, "last_finished_job": dict(last) if last else None}
+        return {
+            "queue_counts": counts,
+            "last_finished_job": dict(last) if last else None,
+            "payload_cleanup": cleanup_counts,
+        }
 
 
 def row_to_job(row: sqlite3.Row) -> dict[str, Any]:

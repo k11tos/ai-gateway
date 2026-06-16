@@ -32,8 +32,15 @@ class ObsidianJobCreateRequest(BaseModel):
 
 class ObsidianJobResultRequest(BaseModel):
     status: Literal["succeeded", "failed"]
-    result_text: str | None = None
-    error_text: str | None = None
+    result_text: Any | None = None
+    error_text: Any | None = None
+
+    @field_validator("result_text", "error_text", mode="before")
+    @classmethod
+    def text_fields_to_string(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return str(value)
 
 
 def _bearer_token(authorization: str | None) -> str | None:
@@ -47,7 +54,9 @@ def _bearer_token(authorization: str | None) -> str | None:
 
 def _require_token(authorization: str | None, expected: str | None) -> None:
     if not expected:
-        raise HTTPException(status_code=503, detail="Obsidian queue auth is not configured")
+        raise HTTPException(
+            status_code=503, detail="Obsidian queue auth is not configured"
+        )
     if _bearer_token(authorization) != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -55,7 +64,9 @@ def _require_token(authorization: str | None, expected: str | None) -> None:
 def _configured_db_path() -> str:
     db_path = os.environ.get("OBSIDIAN_JOBS_DB_PATH")
     if not db_path:
-        raise HTTPException(status_code=503, detail="Obsidian queue database is not configured")
+        raise HTTPException(
+            status_code=503, detail="Obsidian queue database is not configured"
+        )
     return db_path
 
 
@@ -98,7 +109,9 @@ def _job_result_response(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_obsidian_router(
-    store_provider: Callable[[], ObsidianJobStore] = default_obsidian_job_store_provider,
+    store_provider: Callable[
+        [], ObsidianJobStore
+    ] = default_obsidian_job_store_provider,
 ) -> APIRouter:
     router = APIRouter(prefix="/obsidian", tags=["obsidian"])
 
@@ -109,7 +122,9 @@ def create_obsidian_router(
         response: Response,
         authorization: str | None = Header(default=None),
     ):
-        _require_token(authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"))
+        _require_token(
+            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        )
         store = store_provider()
         job = store.create_job(
             command=req.command,
@@ -121,7 +136,9 @@ def create_obsidian_router(
         request_id = _request_id(request)
         if request_id:
             response.headers["X-Request-Id"] = request_id
-        _log_job_event("created", request_id=request_id, job={**job, "command": req.command})
+        _log_job_event(
+            "created", request_id=request_id, job={**job, "command": req.command}
+        )
         return job
 
     @router.get("/jobs/next")
@@ -162,17 +179,23 @@ def create_obsidian_router(
 
     @router.get("/jobs/{job_id}")
     def get_job(job_id: str, authorization: str | None = Header(default=None)):
-        _require_token(authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"))
+        _require_token(
+            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        )
         return _get_job_or_404(store_provider(), job_id)
 
     @router.get("/jobs/{job_id}/result")
     def get_job_result(job_id: str, authorization: str | None = Header(default=None)):
-        _require_token(authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"))
+        _require_token(
+            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        )
         return _job_result_response(_get_job_or_404(store_provider(), job_id))
 
     @router.get("/status")
     def status(authorization: str | None = Header(default=None)):
-        _require_token(authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"))
+        _require_token(
+            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        )
         return store_provider().status_summary()
 
     return router

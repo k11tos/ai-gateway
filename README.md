@@ -126,3 +126,18 @@ Response behavior for `POST /chat` and `POST /generate`:
 - `resolved_model` is included only when alias resolution changed the upstream target model.
 
 If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_ALIASES` wins for that key.
+
+## Obsidian job result retention
+
+The Obsidian endpoints are a job queue and result transport layer only. LLM-backed `ingest`, `ask`, and `draft` work and Obsidian vault access are performed by the external `obsidian-mobile-worker`; the gateway stores command metadata, payloads, status, final result/error text, and timestamps.
+
+Configure temporary payload retention with:
+
+```env
+OBSIDIAN_JOB_RESULT_RETENTION_HOURS=24
+OBSIDIAN_JOB_ERROR_RETENTION_HOURS=72
+OBSIDIAN_JOB_MAX_RESULT_CHARS=20000
+OBSIDIAN_JOB_MAX_ERROR_CHARS=4000
+```
+
+Obsidian job results may contain LLM-generated summaries derived from private notes. ai-gateway stores final results temporarily and clears old payloads according to retention settings. Oversized worker result and error text is truncated at write time with an ai-gateway truncation marker.
