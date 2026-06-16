@@ -141,3 +141,14 @@ OBSIDIAN_JOB_MAX_ERROR_CHARS=4000
 ```
 
 Obsidian job results may contain LLM-generated summaries derived from private notes. ai-gateway stores final results temporarily and clears old payloads according to retention settings. Oversized worker result and error text is truncated at write time with an ai-gateway truncation marker.
+
+### Obsidian job notification delivery
+
+`telegram-ai-bot` can durably poll completed worker jobs for automatic delivery back to the original Telegram chat. ai-gateway only tracks queue/result state; it does not send Telegram messages, read the Obsidian vault, or call an LLM.
+
+Authenticated with `Authorization: Bearer <OBSIDIAN_TELEGRAM_INTERNAL_TOKEN>`:
+
+- `GET /obsidian/jobs/notifications/next` returns the oldest completed (`succeeded` or `failed`) job whose `result_notified_at` is still `null` and whose `telegram_chat_id` is present, or `{ "job": null, "status": "empty" }` when there is nothing to deliver. Jobs without `telegram_chat_id` are still stored but are skipped by notification polling.
+- `POST /obsidian/jobs/{job_id}/notified` idempotently sets `result_notified_at` after `telegram-ai-bot` sends or intentionally acknowledges the result. Worker credentials cannot use this endpoint.
+
+If result retention has already cleared `result_text` or `error_text`, notification polling may still return the completed job so the bot can display a helpful expired-result message. Failed jobs are returned even when `error_text` is empty. Existing direct lookup endpoints such as `GET /obsidian/jobs/{job_id}` and `GET /obsidian/jobs/{job_id}/result` continue to support manual `/wiki result <job_id>` flows.

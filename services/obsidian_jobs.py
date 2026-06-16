@@ -75,9 +75,13 @@ class ObsidianJobStore:
                     error_text text nullable,
                     created_at text not null,
                     locked_at text nullable,
-                    finished_at text nullable
+                    finished_at text nullable,
+                    result_notified_at text nullable
                 )
                 """)
+            self._ensure_column(
+                conn, "obsidian_jobs", "result_notified_at", "text nullable"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_queue "
                 "ON obsidian_jobs(status, created_at)"
@@ -86,6 +90,17 @@ class ObsidianJobStore:
                 "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_finished "
                 "ON obsidian_jobs(finished_at)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_notifications "
+                "ON obsidian_jobs(result_notified_at, status, telegram_chat_id, finished_at)"
+            )
+
+    def _ensure_column(
+        self, conn: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def create_job(
         self,
@@ -208,6 +223,34 @@ class ObsidianJobStore:
             "error_text_cleared": error_cursor.rowcount,
         }
 
+    def get_next_unnotified_job(self) -> dict[str, Any] | None:
+        self.cleanup_obsidian_job_payloads()
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT * FROM obsidian_jobs
+                WHERE status IN ('succeeded', 'failed')
+                  AND result_notified_at IS NULL
+                  AND telegram_chat_id IS NOT NULL
+                ORDER BY finished_at ASC, created_at ASC
+                LIMIT 1
+                """).fetchone()
+        return row_to_job(row) if row else None
+
+    def mark_job_notified(self, job_id: str) -> dict[str, Any] | None:
+        notified_at = utc_now_iso()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE obsidian_jobs
+                SET result_notified_at = COALESCE(result_notified_at, ?)
+                WHERE id = ?
+                """,
+                (notified_at, job_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_job(job_id)
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -251,4 +294,5 @@ def row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "locked_at": row["locked_at"],
         "finished_at": row["finished_at"],
+        "result_notified_at": row["result_notified_at"],
     }
