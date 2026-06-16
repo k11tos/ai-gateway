@@ -1,10 +1,11 @@
+from datetime import datetime, timezone
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from routes.obsidian import create_obsidian_router
 from services.obsidian_jobs import ObsidianJobStore
-
 
 TELEGRAM_TOKEN = "telegram-secret"
 WORKER_TOKEN = "worker-secret"
@@ -19,7 +20,9 @@ def obsidian_client(tmp_path, monkeypatch):
     monkeypatch.setenv("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN", TELEGRAM_TOKEN)
     monkeypatch.setenv("OBSIDIAN_WORKER_TOKEN", WORKER_TOKEN)
     api = FastAPI()
-    api.include_router(create_obsidian_router(lambda: ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))))
+    api.include_router(
+        create_obsidian_router(lambda: ObsidianJobStore(str(tmp_path / "jobs.sqlite3")))
+    )
     return TestClient(api)
 
 
@@ -86,8 +89,12 @@ def test_worker_claims_oldest_queued_job(obsidian_client):
 def test_claimed_job_becomes_running(obsidian_client):
     job_id = create_job(obsidian_client)
 
-    claim_response = obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
-    get_response = obsidian_client.get(f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN))
+    claim_response = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+    get_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
 
     assert claim_response.status_code == 200
     assert claim_response.json()["job"]["status"] == "running"
@@ -99,7 +106,9 @@ def test_claimed_job_becomes_running(obsidian_client):
 def test_get_job_works_with_telegram_token(obsidian_client):
     job_id = create_job(obsidian_client, payload={"question": "status?"})
 
-    response = obsidian_client.get(f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN))
+    response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -163,7 +172,9 @@ def test_get_result_alias_rejects_missing_auth(obsidian_client):
 def test_get_result_alias_rejects_worker_token(obsidian_client):
     job_id = create_job(obsidian_client)
 
-    response = obsidian_client.get(f"/obsidian/jobs/{job_id}/result", headers=auth(WORKER_TOKEN))
+    response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}/result", headers=auth(WORKER_TOKEN)
+    )
 
     assert response.status_code == 401
 
@@ -215,7 +226,9 @@ def test_second_result_call_does_not_overwrite_final_job(obsidian_client):
         headers=auth(WORKER_TOKEN),
         json={"status": "failed", "error_text": "stale failure"},
     )
-    get_response = obsidian_client.get(f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN))
+    get_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
 
     assert first_response.status_code == 200
     assert second_response.status_code == 409
@@ -224,3 +237,167 @@ def test_second_result_call_does_not_overwrite_final_job(obsidian_client):
     assert body["status"] == "succeeded"
     assert body["result_text"] == "original answer"
     assert body["error_text"] is None
+
+
+def test_oversized_result_text_is_truncated(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN", TELEGRAM_TOKEN)
+    monkeypatch.setenv("OBSIDIAN_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("OBSIDIAN_JOB_MAX_RESULT_CHARS", "32")
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    api = FastAPI()
+    api.include_router(create_obsidian_router(lambda: store))
+    client = TestClient(api)
+    job_id = create_job(client)
+    client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
+
+    response = client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "x" * 100},
+    )
+
+    assert response.status_code == 200
+    result_text = response.json()["result_text"]
+    assert len(result_text) == 32
+    assert result_text.endswith("...[truncated by ai-gateway]")
+
+
+def test_oversized_error_text_is_truncated(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN", TELEGRAM_TOKEN)
+    monkeypatch.setenv("OBSIDIAN_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("OBSIDIAN_JOB_MAX_ERROR_CHARS", "32")
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    api = FastAPI()
+    api.include_router(create_obsidian_router(lambda: store))
+    client = TestClient(api)
+    job_id = create_job(client)
+    client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
+
+    response = client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "failed", "error_text": "x" * 100},
+    )
+
+    assert response.status_code == 200
+    error_text = response.json()["error_text"]
+    assert len(error_text) == 32
+    assert error_text.endswith("...[truncated by ai-gateway]")
+
+
+def test_cleanup_clears_old_succeeded_result_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_JOB_RESULT_RETENTION_HOURS", "24")
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    job = store.create_job(
+        command="ask",
+        payload={},
+        telegram_chat_id=None,
+        telegram_message_id=None,
+        requested_by=None,
+    )
+    store.claim_next_job()
+    store.complete_job(
+        job["job_id"], status="succeeded", result_text="old answer", error_text=None
+    )
+    old_finished_at = "2026-06-14T00:00:00+00:00"
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE obsidian_jobs SET finished_at = ? WHERE id = ?",
+            (old_finished_at, job["job_id"]),
+        )
+
+    counts = store.cleanup_obsidian_job_payloads(
+        now=datetime(2026, 6, 16, tzinfo=timezone.utc)
+    )
+
+    assert counts == {"result_text_cleared": 1, "error_text_cleared": 0}
+    cleaned = store.get_job(job["job_id"])
+    assert cleaned["status"] == "succeeded"
+    assert cleaned["result_text"] is None
+
+
+def test_cleanup_clears_old_failed_error_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_JOB_ERROR_RETENTION_HOURS", "72")
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    job = store.create_job(
+        command="ask",
+        payload={},
+        telegram_chat_id=None,
+        telegram_message_id=None,
+        requested_by=None,
+    )
+    store.claim_next_job()
+    store.complete_job(
+        job["job_id"], status="failed", result_text=None, error_text="old error"
+    )
+    old_finished_at = "2026-06-12T00:00:00+00:00"
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE obsidian_jobs SET finished_at = ? WHERE id = ?",
+            (old_finished_at, job["job_id"]),
+        )
+
+    counts = store.cleanup_obsidian_job_payloads(
+        now=datetime(2026, 6, 16, tzinfo=timezone.utc)
+    )
+
+    assert counts == {"result_text_cleared": 0, "error_text_cleared": 1}
+    cleaned = store.get_job(job["job_id"])
+    assert cleaned["status"] == "failed"
+    assert cleaned["error_text"] is None
+
+
+def test_cleanup_does_not_clear_recent_results(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_JOB_RESULT_RETENTION_HOURS", "24")
+    monkeypatch.setenv("OBSIDIAN_JOB_ERROR_RETENTION_HOURS", "72")
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    job = store.create_job(
+        command="ask",
+        payload={},
+        telegram_chat_id=None,
+        telegram_message_id=None,
+        requested_by=None,
+    )
+    store.claim_next_job()
+    store.complete_job(
+        job["job_id"], status="succeeded", result_text="recent answer", error_text=None
+    )
+    recent_finished_at = "2026-06-15T23:00:00+00:00"
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE obsidian_jobs SET finished_at = ? WHERE id = ?",
+            (recent_finished_at, job["job_id"]),
+        )
+
+    counts = store.cleanup_obsidian_job_payloads(
+        now=datetime(2026, 6, 16, tzinfo=timezone.utc)
+    )
+
+    assert counts == {"result_text_cleared": 0, "error_text_cleared": 0}
+    assert store.get_job(job["job_id"])["result_text"] == "recent answer"
+
+
+def test_get_job_rejects_worker_token(obsidian_client):
+    job_id = create_job(obsidian_client)
+
+    response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+    )
+
+    assert response.status_code == 401
+
+
+def test_worker_endpoints_reject_telegram_token(obsidian_client):
+    job_id = create_job(obsidian_client)
+
+    next_response = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(TELEGRAM_TOKEN)
+    )
+    result_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(TELEGRAM_TOKEN),
+        json={"status": "succeeded", "result_text": "answer"},
+    )
+
+    assert next_response.status_code == 401
+    assert result_response.status_code == 401
