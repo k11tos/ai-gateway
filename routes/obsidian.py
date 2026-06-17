@@ -9,6 +9,7 @@ from logger import logger
 from services.obsidian_jobs import (
     ALLOWED_COMMANDS,
     FINAL_STATUSES,
+    JobNotificationConflict,
     JobTransitionConflict,
     ObsidianJobStore,
 )
@@ -182,7 +183,7 @@ def create_obsidian_router(
         _require_token(
             authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
         )
-        job = store_provider().get_next_unnotified_job()
+        job = store_provider().claim_next_unnotified_job()
         if job is None:
             return {"job": None, "status": "empty"}
         return {
@@ -200,7 +201,12 @@ def create_obsidian_router(
         _require_token(
             authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
         )
-        job = store_provider().mark_job_notified(job_id)
+        try:
+            job = store_provider().mark_job_notified(job_id)
+        except JobNotificationConflict as e:
+            raise HTTPException(
+                status_code=409, detail="Job is not completed and deliverable"
+            ) from e
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return {

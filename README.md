@@ -138,6 +138,7 @@ OBSIDIAN_JOB_RESULT_RETENTION_HOURS=24
 OBSIDIAN_JOB_ERROR_RETENTION_HOURS=72
 OBSIDIAN_JOB_MAX_RESULT_CHARS=20000
 OBSIDIAN_JOB_MAX_ERROR_CHARS=4000
+OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS=300
 ```
 
 Obsidian job results may contain LLM-generated summaries derived from private notes. ai-gateway stores final results temporarily and clears old payloads according to retention settings. Oversized worker result and error text is truncated at write time with an ai-gateway truncation marker.
@@ -148,7 +149,9 @@ Obsidian job results may contain LLM-generated summaries derived from private no
 
 Authenticated with `Authorization: Bearer <OBSIDIAN_TELEGRAM_INTERNAL_TOKEN>`:
 
-- `GET /obsidian/jobs/notifications/next` returns the oldest completed (`succeeded` or `failed`) job whose `result_notified_at` is still `null` and whose `telegram_chat_id` is present, or `{ "job": null, "status": "empty" }` when there is nothing to deliver. Jobs without `telegram_chat_id` are still stored but are skipped by notification polling.
-- `POST /obsidian/jobs/{job_id}/notified` idempotently sets `result_notified_at` after `telegram-ai-bot` sends or intentionally acknowledges the result. Worker credentials cannot use this endpoint.
+- `GET /obsidian/jobs/notifications/next` atomically leases and returns the oldest completed (`succeeded` or `failed`) job whose `result_notified_at` is still `null`, whose `telegram_chat_id` is present, and whose notification lease is absent or expired. It returns `{ "job": null, "status": "empty" }` when there is nothing to deliver. Jobs without `telegram_chat_id` are still stored but are skipped by notification polling.
+- `POST /obsidian/jobs/{job_id}/notified` idempotently sets `result_notified_at` after `telegram-ai-bot` sends or intentionally acknowledges the result. Worker credentials cannot use this endpoint, and queued/running jobs or completed jobs without `telegram_chat_id` return `409 Conflict` instead of being acknowledged.
+
+`OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS` controls how long a claimed notification remains hidden from other pollers before it can be returned again. The default is 300 seconds, so overlapping pollers do not receive the same job while crashed bots still recover pending deliveries after the lease expires.
 
 If result retention has already cleared `result_text` or `error_text`, notification polling may still return the completed job so the bot can display a helpful expired-result message. Failed jobs are returned even when `error_text` is empty. Existing direct lookup endpoints such as `GET /obsidian/jobs/{job_id}` and `GET /obsidian/jobs/{job_id}/result` continue to support manual `/wiki result <job_id>` flows.
