@@ -9,6 +9,7 @@ from logger import logger
 from services.obsidian_jobs import (
     ALLOWED_COMMANDS,
     FINAL_STATUSES,
+    JobNotificationConflict,
     JobTransitionConflict,
     ObsidianJobStore,
 )
@@ -176,6 +177,44 @@ def create_obsidian_router(
             raise HTTPException(status_code=404, detail="Job not found")
         _log_job_event("finished", request_id=_request_id(request), job=job)
         return job
+
+    @router.get("/jobs/notifications/next")
+    def get_next_notification(authorization: str | None = Header(default=None)):
+        _require_token(
+            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        )
+        job = store_provider().claim_next_unnotified_job()
+        if job is None:
+            return {"job": None, "status": "empty"}
+        return {
+            "job": _job_result_response(job)
+            | {
+                "telegram_chat_id": job["telegram_chat_id"],
+                "created_at": job["created_at"],
+            }
+        }
+
+    @router.post("/jobs/{job_id}/notified")
+    def mark_job_notified(
+        job_id: str, authorization: str | None = Header(default=None)
+    ):
+        _require_token(
+            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        )
+        try:
+            job = store_provider().mark_job_notified(job_id)
+        except JobNotificationConflict as e:
+            raise HTTPException(
+                status_code=409, detail="Job is not completed and deliverable"
+            ) from e
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {
+            "ok": True,
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "result_notified_at": job["result_notified_at"],
+        }
 
     @router.get("/jobs/{job_id}")
     def get_job(job_id: str, authorization: str | None = Header(default=None)):

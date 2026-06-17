@@ -38,6 +38,10 @@ class JobTransitionConflict(Exception):
     pass
 
 
+class JobNotificationConflict(Exception):
+    pass
+
+
 class ObsidianJobStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -49,6 +53,9 @@ class ObsidianJobStore:
         )
         self.max_result_chars = _read_int_env("OBSIDIAN_JOB_MAX_RESULT_CHARS", 20000)
         self.max_error_chars = _read_int_env("OBSIDIAN_JOB_MAX_ERROR_CHARS", 4000)
+        self.notification_lease_seconds = _read_int_env(
+            "OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS", 300
+        )
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -75,9 +82,20 @@ class ObsidianJobStore:
                     error_text text nullable,
                     created_at text not null,
                     locked_at text nullable,
-                    finished_at text nullable
+                    finished_at text nullable,
+                    result_notified_at text nullable,
+                    result_notification_claimed_until text nullable
                 )
                 """)
+            self._ensure_column(
+                conn, "obsidian_jobs", "result_notified_at", "text nullable"
+            )
+            self._ensure_column(
+                conn,
+                "obsidian_jobs",
+                "result_notification_claimed_until",
+                "text nullable",
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_queue "
                 "ON obsidian_jobs(status, created_at)"
@@ -86,6 +104,19 @@ class ObsidianJobStore:
                 "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_finished "
                 "ON obsidian_jobs(finished_at)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_obsidian_jobs_notifications "
+                "ON obsidian_jobs("
+                "result_notified_at, result_notification_claimed_until, "
+                "status, telegram_chat_id, finished_at)"
+            )
+
+    def _ensure_column(
+        self, conn: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def create_job(
         self,
@@ -156,7 +187,12 @@ class ObsidianJobStore:
             cursor = conn.execute(
                 """
                 UPDATE obsidian_jobs
-                SET status = ?, result_text = ?, error_text = ?, finished_at = ?
+                SET status = ?,
+                    result_text = ?,
+                    error_text = ?,
+                    finished_at = ?,
+                    result_notified_at = NULL,
+                    result_notification_claimed_until = NULL
                 WHERE id = ? AND status = 'running'
                 """,
                 (status, result_text, error_text, finished_at, job_id),
@@ -208,6 +244,76 @@ class ObsidianJobStore:
             "error_text_cleared": error_cursor.rowcount,
         }
 
+    def claim_next_unnotified_job(self) -> dict[str, Any] | None:
+        self.cleanup_obsidian_job_payloads()
+        now = utc_now_iso()
+        claimed_until = (
+            datetime.now(timezone.utc)
+            + timedelta(seconds=self.notification_lease_seconds)
+        ).isoformat()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM obsidian_jobs
+                WHERE status IN ('succeeded', 'failed')
+                  AND result_notified_at IS NULL
+                  AND telegram_chat_id IS NOT NULL
+                  AND (
+                    result_notification_claimed_until IS NULL
+                    OR result_notification_claimed_until <= ?
+                  )
+                ORDER BY finished_at ASC, created_at ASC
+                LIMIT 1
+                """,
+                (now,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+
+            conn.execute(
+                """
+                UPDATE obsidian_jobs
+                SET result_notification_claimed_until = ?
+                WHERE id = ?
+                """,
+                (claimed_until, row["id"]),
+            )
+            conn.execute("COMMIT")
+        return self.get_job(row["id"])
+
+    def mark_job_notified(self, job_id: str) -> dict[str, Any] | None:
+        notified_at = utc_now_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT * FROM obsidian_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if existing is None:
+                conn.execute("COMMIT")
+                return None
+            if (
+                existing["status"] not in FINAL_STATUSES
+                or existing["telegram_chat_id"] is None
+            ):
+                conn.execute("COMMIT")
+                raise JobNotificationConflict(
+                    f"job {job_id} is not completed and deliverable"
+                )
+
+            conn.execute(
+                """
+                UPDATE obsidian_jobs
+                SET result_notified_at = COALESCE(result_notified_at, ?),
+                    result_notification_claimed_until = NULL
+                WHERE id = ?
+                """,
+                (notified_at, job_id),
+            )
+            conn.execute("COMMIT")
+        return self.get_job(job_id)
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -251,4 +357,6 @@ def row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "locked_at": row["locked_at"],
         "finished_at": row["finished_at"],
+        "result_notified_at": row["result_notified_at"],
+        "result_notification_claimed_until": row["result_notification_claimed_until"],
     }

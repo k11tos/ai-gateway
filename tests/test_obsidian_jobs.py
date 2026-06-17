@@ -26,14 +26,35 @@ def obsidian_client(tmp_path, monkeypatch):
     return TestClient(api)
 
 
-def create_job(client, command="ask", payload=None):
+def create_job(client, command="ask", payload=None, telegram_chat_id=None):
+    body = {"command": command, "payload": payload or {"question": "hello"}}
+    if telegram_chat_id is not None:
+        body["telegram_chat_id"] = telegram_chat_id
     response = client.post(
         "/obsidian/jobs",
         headers=auth(TELEGRAM_TOKEN),
-        json={"command": command, "payload": payload or {"question": "hello"}},
+        json=body,
     )
     assert response.status_code == 200
     return response.json()["job_id"]
+
+
+def complete_job(
+    client, job_id, status="succeeded", result_text="answer", error_text=None
+):
+    client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
+    payload = {"status": status}
+    if result_text is not None:
+        payload["result_text"] = result_text
+    if error_text is not None:
+        payload["error_text"] = error_text
+    response = client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json=payload,
+    )
+    assert response.status_code == 200
+    return response.json()
 
 
 def test_job_creation(obsidian_client):
@@ -375,6 +396,250 @@ def test_cleanup_does_not_clear_recent_results(tmp_path, monkeypatch):
 
     assert counts == {"result_text_cleared": 0, "error_text_cleared": 0}
     assert store.get_job(job["job_id"])["result_text"] == "recent answer"
+
+
+def test_succeeded_job_with_chat_id_appears_in_notifications_next(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    finished = complete_job(obsidian_client, job_id, result_text="answer")
+
+    response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "job": {
+            "job_id": job_id,
+            "command": "ask",
+            "status": "succeeded",
+            "telegram_chat_id": 12345,
+            "result_text": "answer",
+            "error_text": None,
+            "created_at": finished["created_at"],
+            "finished_at": finished["finished_at"],
+        }
+    }
+
+
+def test_failed_job_with_chat_id_appears_in_notifications_next(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    complete_job(
+        obsidian_client,
+        job_id,
+        status="failed",
+        result_text=None,
+        error_text="vault unavailable",
+    )
+
+    response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["job_id"] == job_id
+    assert job["status"] == "failed"
+    assert job["telegram_chat_id"] == 12345
+    assert job["error_text"] == "vault unavailable"
+
+
+def test_queued_and_running_jobs_do_not_appear_in_notifications_next(obsidian_client):
+    create_job(obsidian_client, telegram_chat_id=12345)
+    running_job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    claimed = obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))
+
+    response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert claimed.status_code == 200
+    assert claimed.json()["job"]["status"] == "running"
+    assert claimed.json()["job"]["job_id"] != running_job_id
+    assert response.status_code == 200
+    assert response.json() == {"job": None, "status": "empty"}
+
+
+def test_completed_job_without_chat_id_does_not_appear_in_notifications_next(
+    obsidian_client,
+):
+    job_id = create_job(obsidian_client)
+    complete_job(obsidian_client, job_id, result_text="answer")
+
+    response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"job": None, "status": "empty"}
+
+
+def test_notification_next_leases_job_until_notified_or_expired(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    complete_job(obsidian_client, job_id, result_text="answer")
+
+    first_response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+    second_response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["job"]["job_id"] == job_id
+    assert second_response.status_code == 200
+    assert second_response.json() == {"job": None, "status": "empty"}
+
+
+def test_notification_next_returns_job_again_after_lease_expires(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN", TELEGRAM_TOKEN)
+    monkeypatch.setenv("OBSIDIAN_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS", "300")
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    api = FastAPI()
+    api.include_router(create_obsidian_router(lambda: store))
+    client = TestClient(api)
+    job_id = create_job(client, telegram_chat_id=12345)
+    complete_job(client, job_id, result_text="answer")
+    first_response = client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+    with store._connect() as conn:
+        conn.execute(
+            """
+            UPDATE obsidian_jobs
+            SET result_notification_claimed_until = ?
+            WHERE id = ?
+            """,
+            ("2026-06-15T00:00:00+00:00", job_id),
+        )
+
+    second_response = client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["job"]["job_id"] == job_id
+    assert second_response.status_code == 200
+    assert second_response.json()["job"]["job_id"] == job_id
+
+
+def test_notified_job_does_not_appear_in_notifications_next(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    complete_job(obsidian_client, job_id, result_text="answer")
+    mark_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert mark_response.status_code == 200
+    assert response.status_code == 200
+    assert response.json() == {"job": None, "status": "empty"}
+
+
+def test_mark_notified_sets_result_notified_at_and_is_idempotent(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    complete_job(obsidian_client, job_id, result_text="answer")
+
+    first_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+    second_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json()["result_notified_at"] is not None
+    assert (
+        second_response.json()["result_notified_at"]
+        == first_response.json()["result_notified_at"]
+    )
+
+
+def test_mark_notified_rejects_queued_job_without_setting_timestamp(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+
+    response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+    get_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert response.status_code == 409
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "queued"
+    assert get_response.json()["result_notified_at"] is None
+
+
+def test_mark_notified_rejects_running_job_without_setting_timestamp(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+    claim_response = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+
+    response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+    get_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert claim_response.status_code == 200
+    assert response.status_code == 409
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "running"
+    assert get_response.json()["result_notified_at"] is None
+
+
+def test_mark_notified_rejects_completed_job_without_chat_id(obsidian_client):
+    job_id = create_job(obsidian_client)
+    complete_job(obsidian_client, job_id, result_text="answer")
+
+    response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+    get_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert response.status_code == 409
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "succeeded"
+    assert get_response.json()["result_notified_at"] is None
+
+
+def test_notification_endpoints_reject_missing_wrong_and_worker_tokens(obsidian_client):
+    job_id = create_job(obsidian_client, telegram_chat_id=12345)
+
+    responses = [
+        obsidian_client.get("/obsidian/jobs/notifications/next"),
+        obsidian_client.get(
+            "/obsidian/jobs/notifications/next", headers=auth("wrong-token")
+        ),
+        obsidian_client.get(
+            "/obsidian/jobs/notifications/next", headers=auth(WORKER_TOKEN)
+        ),
+        obsidian_client.post(f"/obsidian/jobs/{job_id}/notified"),
+        obsidian_client.post(
+            f"/obsidian/jobs/{job_id}/notified", headers=auth("wrong-token")
+        ),
+        obsidian_client.post(
+            f"/obsidian/jobs/{job_id}/notified", headers=auth(WORKER_TOKEN)
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [
+        401,
+        401,
+        401,
+        401,
+        401,
+        401,
+    ]
 
 
 def test_get_job_rejects_worker_token(obsidian_client):
