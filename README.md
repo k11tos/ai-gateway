@@ -1,5 +1,19 @@
 # AI Gateway
 
+## Role
+
+ai-gateway has two separate responsibilities:
+
+1. **AI assistant API**: the existing chat, generation, streaming, embedding, preset, provider, model, metrics, version, and health endpoints remain supported for non-wiki assistant clients. These features call the configured upstream AI provider as documented below and are independent of the Obsidian wiki workflow.
+2. **Obsidian wiki job transport**: the `/obsidian/jobs` endpoints are the queue, result, and notification state transport for wiki jobs shared by `telegram-ai-bot` and `obsidian-mobile-worker`. ai-gateway stores job metadata, payloads, queue state, worker result/error text, notification leases, and notification acknowledgements. It does **not** run wiki LLM logic, execute opencode, read the Obsidian vault, or perform vault-side file changes.
+
+Final wiki direction:
+
+- `telegram-ai-bot` submits wiki jobs to ai-gateway and later polls notification state to deliver completed results to Telegram chats.
+- ai-gateway durably stores queued jobs, running/completed status, result/error payloads, and notification delivery state.
+- The MacBook-side `obsidian-mobile-worker`, together with opencode, claims jobs from ai-gateway and performs all vault-side work against the local Obsidian vault.
+- `/wiki capture` is removed from the workflow; wiki requests should use the remaining job commands supported by `telegram-ai-bot` and `obsidian-mobile-worker`.
+
 ## Install
 
 Runtime dependencies are intentionally minimized in `requirements.txt`.
@@ -127,9 +141,20 @@ Response behavior for `POST /chat` and `POST /generate`:
 
 If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_ALIASES` wins for that key.
 
-## Obsidian job result retention
+## Obsidian wiki job transport
 
-The Obsidian endpoints are a job queue and result transport layer only. LLM-backed `ingest`, `ask`, and `draft` work and Obsidian vault access are performed by the external `obsidian-mobile-worker`; the gateway stores command metadata, payloads, status, final result/error text, and timestamps.
+The Obsidian endpoints are a job queue, result, and notification state transport layer only. Wiki LLM reasoning, opencode execution, and Obsidian vault reads/writes happen outside ai-gateway on the MacBook-side `obsidian-mobile-worker`; the gateway stores command metadata, payloads, status, final result/error text, notification lease/acknowledgement state, and timestamps.
+
+This is intentionally separate from the non-wiki AI assistant API described above. Assistant endpoints such as `POST /chat`, `POST /generate_stream`, and `POST /embedding` remain supported, but they are not part of the Obsidian wiki job execution path.
+
+### Workflow boundaries
+
+- **Telegram submitter**: `telegram-ai-bot` accepts `/wiki` requests and creates `/obsidian/jobs` records in ai-gateway. `/wiki capture` is no longer part of the supported workflow.
+- **Transport store**: ai-gateway persists queue state (`queued`, `running`, `succeeded`, `failed`), job payloads, worker result/error text, notification leases, and `result_notified_at` acknowledgements.
+- **Vault worker**: `obsidian-mobile-worker` runs on the MacBook, claims jobs from ai-gateway, invokes opencode for wiki work, reads/writes the local Obsidian vault as needed, and posts the final job result back to ai-gateway.
+- **Telegram delivery**: `telegram-ai-bot` polls ai-gateway for completed unnotified jobs and sends result notifications to the original Telegram chat. ai-gateway does not send Telegram messages.
+
+### Obsidian job result retention
 
 Configure temporary payload retention with:
 
@@ -154,4 +179,4 @@ Authenticated with `Authorization: Bearer <OBSIDIAN_TELEGRAM_INTERNAL_TOKEN>`:
 
 `OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS` controls how long a claimed notification remains hidden from other pollers before it can be returned again. The default is 300 seconds, so overlapping pollers do not receive the same job while crashed bots still recover pending deliveries after the lease expires.
 
-If result retention has already cleared `result_text` or `error_text`, notification polling may still return the completed job so the bot can display a helpful expired-result message. Failed jobs are returned even when `error_text` is empty. Existing direct lookup endpoints such as `GET /obsidian/jobs/{job_id}` and `GET /obsidian/jobs/{job_id}/result` continue to support manual `/wiki result <job_id>` flows.
+If result retention has already cleared `result_text` or `error_text`, notification polling may still return the completed job so the bot can display a helpful expired-result message. Failed jobs are returned even when `error_text` is empty. Existing direct lookup endpoints such as `GET /obsidian/jobs/{job_id}` and `GET /obsidian/jobs/{job_id}/result` continue to support manual `/wiki result <job_id>` flows. `/wiki capture` should not be documented or reintroduced as a client workflow.
