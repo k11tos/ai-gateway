@@ -126,6 +126,83 @@ def test_historical_capture_job_remains_readable(tmp_path, monkeypatch):
     assert response.json()["result_text"] == "legacy result"
 
 
+def test_draft_remains_accepted_for_client_compatibility(obsidian_client):
+    payload = {"instruction": "Prepare a draft without changing source notes."}
+
+    response = obsidian_client.post(
+        "/obsidian/jobs",
+        headers=auth(TELEGRAM_TOKEN),
+        json={"command": "draft", "payload": payload},
+    )
+
+    assert response.status_code == 200
+    job = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    ).json()["job"]
+    assert job["command"] == "draft"
+    assert job["payload"] == payload
+
+
+@pytest.mark.parametrize(
+    ("command", "payload"),
+    [
+        ("update", {"instruction": "Rename the note and preserve its links."}),
+        ("save", {"source_job_id": "source-job-123"}),
+        ("lint", {}),
+        ("lint", {"instruction": "Check links and frontmatter."}),
+        (
+            "refactor",
+            {"mode": "preview", "instruction": "Preview a folder reorganization."},
+        ),
+    ],
+    ids=["update", "save", "lint-empty", "lint-instructed", "refactor-preview"],
+)
+def test_shared_payload_contract_survives_complete_notified_lifecycle(
+    obsidian_client, command, payload
+):
+    created = obsidian_client.post(
+        "/obsidian/jobs",
+        headers=auth(TELEGRAM_TOKEN),
+        json={"command": command, "payload": payload, "telegram_chat_id": 13579},
+    )
+    assert created.status_code == 200
+    job_id = created.json()["job_id"]
+
+    persisted = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+    claimed = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+    completed = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "done"},
+    )
+    retrieved = obsidian_client.get(
+        f"/obsidian/worker/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+    )
+    notification = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+    notified = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+    final = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert persisted.json()["payload"] == payload
+    assert claimed.json()["job"]["payload"] == payload
+    assert completed.json()["payload"] == payload
+    assert retrieved.json()["payload"] == payload
+    assert notification.json()["job"]["job_id"] == job_id
+    assert notification.json()["job"]["command"] == command
+    assert notified.status_code == 200
+    assert final.json()["payload"] == payload
+    assert final.json()["result_notified_at"] is not None
+
+
 def test_update_payload_survives_job_lifecycle_and_notification(obsidian_client):
     payload = {"instruction": "Rename the project note and keep its links."}
     create_response = obsidian_client.post(
