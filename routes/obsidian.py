@@ -223,6 +223,13 @@ def create_obsidian_router(
         )
         return _get_job_or_404(store_provider(), job_id)
 
+    @router.get("/worker/jobs/{job_id}")
+    def get_source_job_for_worker(
+        job_id: str, authorization: str | None = Header(default=None)
+    ):
+        _require_token(authorization, os.environ.get("OBSIDIAN_WORKER_TOKEN"))
+        return _get_job_or_404(store_provider(), job_id)
+
     @router.get("/jobs/{job_id}/result")
     def get_job_result(job_id: str, authorization: str | None = Header(default=None)):
         _require_token(
