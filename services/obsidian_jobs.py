@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-ALLOWED_COMMANDS = {"ask", "ingest", "draft", "save", "status", "update"}
+ALLOWED_COMMANDS = {"ask", "ingest", "draft", "lint", "save", "status", "update"}
 FINAL_STATUSES = {"succeeded", "failed"}
 ALL_STATUSES = {"queued", "running", "succeeded", "failed", "expired"}
 TRUNCATION_MARKER = "...[truncated by ai-gateway]"
