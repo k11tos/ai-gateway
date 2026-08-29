@@ -249,6 +249,126 @@ def test_get_job_works_with_telegram_token(obsidian_client):
     assert body["status"] == "queued"
 
 
+def test_worker_can_lookup_completed_source_ask_with_original_data(obsidian_client):
+    payload = {
+        "question": "What did the gateway contract phase decide?",
+        "options": {"scope": "unchanged"},
+    }
+    job_id = create_job(obsidian_client, command="ask", payload=payload)
+    completed = complete_job(
+        obsidian_client, job_id, result_text="Use explicit worker-side saving."
+    )
+
+    response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_id"] == job_id
+    assert body["command"] == "ask"
+    assert body["payload"] == payload
+    assert body["status"] == "succeeded"
+    assert body["result_text"] == "Use explicit worker-side saving."
+    assert body["error_text"] is None
+    assert body["finished_at"] == completed["finished_at"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_status", "result_text", "error_text"),
+    [
+        ("ask", "queued", None, None),
+        ("update", "failed", None, "update failed"),
+    ],
+)
+def test_worker_lookup_represents_data_for_source_validation(
+    obsidian_client, command, expected_status, result_text, error_text
+):
+    job_id = create_job(obsidian_client, command=command, payload={"value": command})
+    if expected_status == "failed":
+        complete_job(
+            obsidian_client,
+            job_id,
+            status="failed",
+            result_text=result_text,
+            error_text=error_text,
+        )
+
+    response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["command"] == command
+    assert response.json()["status"] == expected_status
+    assert response.json()["result_text"] == result_text
+    assert response.json()["error_text"] == error_text
+
+
+def test_worker_job_lookup_requires_valid_auth(obsidian_client):
+    job_id = create_job(obsidian_client)
+
+    missing = obsidian_client.get(f"/obsidian/jobs/{job_id}")
+    invalid = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth("not-a-worker")
+    )
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+
+
+def test_save_payload_survives_job_lifecycle_untouched(obsidian_client):
+    source_job_id = create_job(obsidian_client, payload={"question": "Keep this?"})
+    save_payload = {"source_job_id": source_job_id}
+
+    job_id = create_job(obsidian_client, command="save", payload=save_payload)
+    # The source ask is older, so claim and complete it before claiming the save job.
+    source_claim = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+    assert source_claim.json()["job"]["job_id"] == source_job_id
+    complete_response = obsidian_client.post(
+        f"/obsidian/jobs/{source_job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "Source answer"},
+    )
+    assert complete_response.status_code == 200
+
+    claim_response = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+    assert claim_response.status_code == 200
+    assert claim_response.json()["job"]["job_id"] == job_id
+    assert claim_response.json()["job"]["command"] == "save"
+    assert claim_response.json()["job"]["payload"] == save_payload
+
+    result_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "Saved"},
+    )
+    lookup_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+    )
+
+    assert result_response.status_code == 200
+    assert result_response.json()["payload"] == save_payload
+    assert lookup_response.status_code == 200
+    assert lookup_response.json()["payload"] == save_payload
+    assert lookup_response.json()["status"] == "succeeded"
+
+
+def test_save_payload_shape_remains_worker_owned(obsidian_client):
+    for payload in ({}, {"source_job_id": 123}, {"source_job_id": "ask-id", "x": 1}):
+        response = obsidian_client.post(
+            "/obsidian/jobs",
+            headers=auth(TELEGRAM_TOKEN),
+            json={"command": "save", "payload": payload},
+        )
+
+        assert response.status_code == 200
+
+
 def test_result_update_stores_succeeded_result(obsidian_client):
     job_id = create_job(obsidian_client)
     obsidian_client.get("/obsidian/jobs/next", headers=auth(WORKER_TOKEN))

@@ -62,6 +62,18 @@ def _require_token(authorization: str | None, expected: str | None) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def _require_one_of_tokens(
+    authorization: str | None, expected_tokens: tuple[str | None, ...]
+) -> None:
+    configured_tokens = {token for token in expected_tokens if token}
+    if not configured_tokens:
+        raise HTTPException(
+            status_code=503, detail="Obsidian queue auth is not configured"
+        )
+    if _bearer_token(authorization) not in configured_tokens:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 def _configured_db_path() -> str:
     db_path = os.environ.get("OBSIDIAN_JOBS_DB_PATH")
     if not db_path:
@@ -218,8 +230,12 @@ def create_obsidian_router(
 
     @router.get("/jobs/{job_id}")
     def get_job(job_id: str, authorization: str | None = Header(default=None)):
-        _require_token(
-            authorization, os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN")
+        _require_one_of_tokens(
+            authorization,
+            (
+                os.environ.get("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN"),
+                os.environ.get("OBSIDIAN_WORKER_TOKEN"),
+            ),
         )
         return _get_job_or_404(store_provider(), job_id)
 

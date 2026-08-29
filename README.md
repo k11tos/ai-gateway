@@ -129,7 +129,9 @@ If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_AL
 
 ## Obsidian job result retention
 
-The Obsidian endpoints are a job queue and result transport layer only. New jobs are restricted to the gateway-owned command allowlist: `ask`, `draft`, `ingest`, `status`, and `update`. New `capture` jobs are rejected, while historical persisted `capture` jobs and their results remain readable through the existing lookup endpoints. Command payloads are otherwise opaque dictionaries: their shape and interpretation belong to the external `obsidian-mobile-worker`, which also performs LLM-backed work and Obsidian vault access. The gateway stores command metadata, payloads, status, final result/error text, and timestamps.
+The Obsidian endpoints are a job queue and result transport layer only. New jobs are restricted to the gateway-owned command allowlist: `ask`, `draft`, `ingest`, `save`, `status`, and `update`. New `capture` jobs are rejected, while historical persisted `capture` jobs and their results remain readable through the existing lookup endpoints. Command payloads are otherwise opaque dictionaries: their shape and interpretation belong to the external `obsidian-mobile-worker`, which also performs LLM-backed work and Obsidian vault access. The gateway stores command metadata, payloads, status, final result/error text, and timestamps.
+
+An authenticated worker can resolve the `source_job_id` carried by a `save` job with `GET /obsidian/jobs/{source_job_id}` using `Authorization: Bearer <OBSIDIAN_WORKER_TOKEN>`. The existing detail response is returned unchanged and includes `job_id`, `command`, the original `payload`, `status`, `result_text`, `error_text`, and lifecycle timestamps. Telegram credentials remain accepted for backward compatibility. A save request is transported as `{"command":"save","payload":{"source_job_id":"..."}}`; like other command payloads, the gateway preserves that payload without interpreting or validating worker-owned semantics.
 
 Configure temporary payload retention with:
 
