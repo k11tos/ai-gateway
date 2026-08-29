@@ -86,6 +86,46 @@ def test_invalid_command_rejected(obsidian_client):
     assert response.status_code == 422
 
 
+def test_capture_command_rejected(obsidian_client):
+    response = obsidian_client.post(
+        "/obsidian/jobs",
+        headers=auth(TELEGRAM_TOKEN),
+        json={"command": "capture", "payload": {"text": "legacy note"}},
+    )
+
+    assert response.status_code == 422
+
+
+def test_historical_capture_job_remains_readable(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_TELEGRAM_INTERNAL_TOKEN", TELEGRAM_TOKEN)
+    store = ObsidianJobStore(str(tmp_path / "jobs.sqlite3"))
+    historical = store.create_job(
+        command="capture",
+        payload={"text": "legacy note"},
+        telegram_chat_id=None,
+        telegram_message_id=None,
+        requested_by=None,
+    )
+    store.claim_next_job()
+    store.complete_job(
+        historical["job_id"],
+        status="succeeded",
+        result_text="legacy result",
+        error_text=None,
+    )
+    client = TestClient(create_obsidian_router(lambda: store))
+
+    response = client.get(
+        f"/obsidian/jobs/{historical['job_id']}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["command"] == "capture"
+    assert response.json()["payload"] == {"text": "legacy note"}
+    assert response.json()["status"] == "succeeded"
+    assert response.json()["result_text"] == "legacy result"
+
+
 def test_missing_auth_rejected(obsidian_client):
     response = obsidian_client.post(
         "/obsidian/jobs",
