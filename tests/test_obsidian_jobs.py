@@ -196,6 +196,54 @@ def test_update_payload_survives_job_lifecycle_and_notification(obsidian_client)
     assert final_response.json()["result_notified_at"] is not None
 
 
+def test_preview_refactor_payload_survives_create_claim_complete_result_flow(
+    obsidian_client,
+):
+    payload = {
+        "mode": "preview",
+        "instruction": "Rename the project note and preserve its incoming links.",
+    }
+    create_response = obsidian_client.post(
+        "/obsidian/jobs",
+        headers=auth(TELEGRAM_TOKEN),
+        json={"command": "refactor", "payload": payload},
+    )
+
+    assert create_response.status_code == 200
+    job_id = create_response.json()["job_id"]
+
+    claim_response = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+
+    assert claim_response.status_code == 200
+    assert claim_response.json()["job"]["job_id"] == job_id
+    assert claim_response.json()["job"]["command"] == "refactor"
+    assert claim_response.json()["job"]["payload"] == payload
+    assert claim_response.json()["job"]["status"] == "running"
+
+    completion_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "Preview ready."},
+    )
+    result_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}/result", headers=auth(TELEGRAM_TOKEN)
+    )
+    completed_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert completion_response.status_code == 200
+    assert completion_response.json()["payload"] == payload
+    assert result_response.status_code == 200
+    assert result_response.json()["command"] == "refactor"
+    assert result_response.json()["status"] == "succeeded"
+    assert result_response.json()["result_text"] == "Preview ready."
+    assert completed_response.status_code == 200
+    assert completed_response.json()["payload"] == payload
+
+
 @pytest.mark.parametrize(
     "payload",
     [
