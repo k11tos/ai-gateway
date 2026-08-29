@@ -129,7 +129,7 @@ If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_AL
 
 ## Obsidian job result retention
 
-The Obsidian endpoints are a job queue and result transport layer only. New jobs are restricted to the gateway-owned command allowlist: `ask`, `draft`, `ingest`, and `status`. New `capture` jobs are rejected, while historical persisted `capture` jobs and their results remain readable through the existing lookup endpoints. Command payloads are otherwise opaque dictionaries: their shape and interpretation belong to the external `obsidian-mobile-worker`, which also performs LLM-backed work and Obsidian vault access. The gateway stores command metadata, payloads, status, final result/error text, and timestamps.
+The Obsidian endpoints are a job queue and result transport layer only. New jobs are restricted to the gateway-owned command allowlist: `ask`, `draft`, `ingest`, `status`, and `update`. New `capture` jobs are rejected, while historical persisted `capture` jobs and their results remain readable through the existing lookup endpoints. Command payloads are otherwise opaque dictionaries: their shape and interpretation belong to the external `obsidian-mobile-worker`, which also performs LLM-backed work and Obsidian vault access. The gateway stores command metadata, payloads, status, final result/error text, and timestamps.
 
 Configure temporary payload retention with:
 
