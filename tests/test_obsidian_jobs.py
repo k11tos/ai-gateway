@@ -260,7 +260,7 @@ def test_worker_can_lookup_completed_source_ask_with_original_data(obsidian_clie
     )
 
     response = obsidian_client.get(
-        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+        f"/obsidian/worker/jobs/{job_id}", headers=auth(WORKER_TOKEN)
     )
 
     assert response.status_code == 200
@@ -295,7 +295,7 @@ def test_worker_lookup_represents_data_for_source_validation(
         )
 
     response = obsidian_client.get(
-        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+        f"/obsidian/worker/jobs/{job_id}", headers=auth(WORKER_TOKEN)
     )
 
     assert response.status_code == 200
@@ -305,16 +305,20 @@ def test_worker_lookup_represents_data_for_source_validation(
     assert response.json()["error_text"] == error_text
 
 
-def test_worker_job_lookup_requires_valid_auth(obsidian_client):
+def test_worker_source_job_lookup_requires_worker_auth(obsidian_client):
     job_id = create_job(obsidian_client)
 
-    missing = obsidian_client.get(f"/obsidian/jobs/{job_id}")
+    missing = obsidian_client.get(f"/obsidian/worker/jobs/{job_id}")
     invalid = obsidian_client.get(
-        f"/obsidian/jobs/{job_id}", headers=auth("not-a-worker")
+        f"/obsidian/worker/jobs/{job_id}", headers=auth("not-a-worker")
+    )
+    telegram = obsidian_client.get(
+        f"/obsidian/worker/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
     )
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
+    assert telegram.status_code == 401
 
 
 def test_save_payload_survives_job_lifecycle_untouched(obsidian_client):
@@ -348,7 +352,7 @@ def test_save_payload_survives_job_lifecycle_untouched(obsidian_client):
         json={"status": "succeeded", "result_text": "Saved"},
     )
     lookup_response = obsidian_client.get(
-        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+        f"/obsidian/worker/jobs/{job_id}", headers=auth(WORKER_TOKEN)
     )
 
     assert result_response.status_code == 200
@@ -872,14 +876,20 @@ def test_notification_endpoints_reject_missing_wrong_and_worker_tokens(obsidian_
     ]
 
 
-def test_get_job_rejects_worker_token(obsidian_client):
+def test_get_job_rejects_worker_missing_and_invalid_tokens(obsidian_client):
     job_id = create_job(obsidian_client)
 
-    response = obsidian_client.get(
-        f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
-    )
+    responses = [
+        obsidian_client.get(
+            f"/obsidian/jobs/{job_id}", headers=auth(WORKER_TOKEN)
+        ),
+        obsidian_client.get(f"/obsidian/jobs/{job_id}"),
+        obsidian_client.get(
+            f"/obsidian/jobs/{job_id}", headers=auth("wrong-token")
+        ),
+    ]
 
-    assert response.status_code == 401
+    assert [response.status_code for response in responses] == [401, 401, 401]
 
 
 def test_worker_endpoints_reject_telegram_token(obsidian_client):
