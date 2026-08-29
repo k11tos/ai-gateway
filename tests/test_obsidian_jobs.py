@@ -126,6 +126,76 @@ def test_historical_capture_job_remains_readable(tmp_path, monkeypatch):
     assert response.json()["result_text"] == "legacy result"
 
 
+def test_update_payload_survives_job_lifecycle_and_notification(obsidian_client):
+    payload = {"instruction": "Rename the project note and keep its links."}
+    create_response = obsidian_client.post(
+        "/obsidian/jobs",
+        headers=auth(TELEGRAM_TOKEN),
+        json={"command": "update", "payload": payload, "telegram_chat_id": 12345},
+    )
+    assert create_response.status_code == 200
+    job_id = create_response.json()["job_id"]
+
+    queued_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+    claim_response = obsidian_client.get(
+        "/obsidian/jobs/next", headers=auth(WORKER_TOKEN)
+    )
+
+    assert queued_response.status_code == 200
+    assert queued_response.json()["command"] == "update"
+    assert queued_response.json()["payload"] == payload
+    assert queued_response.json()["status"] == "queued"
+    assert claim_response.status_code == 200
+    assert claim_response.json()["job"]["command"] == "update"
+    assert claim_response.json()["job"]["payload"] == payload
+    assert claim_response.json()["job"]["status"] == "running"
+
+    completion_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/result",
+        headers=auth(WORKER_TOKEN),
+        json={"status": "succeeded", "result_text": "Project note updated."},
+    )
+    result_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}/result", headers=auth(TELEGRAM_TOKEN)
+    )
+    completed_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+    notification_response = obsidian_client.get(
+        "/obsidian/jobs/notifications/next", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert completion_response.status_code == 200
+    assert completion_response.json()["payload"] == payload
+    assert result_response.status_code == 200
+    assert result_response.json()["command"] == "update"
+    assert result_response.json()["status"] == "succeeded"
+    assert result_response.json()["result_text"] == "Project note updated."
+    assert completed_response.status_code == 200
+    assert completed_response.json()["payload"] == payload
+    assert notification_response.status_code == 200
+    assert notification_response.json()["job"]["job_id"] == job_id
+    assert notification_response.json()["job"]["command"] == "update"
+    assert notification_response.json()["job"]["result_text"] == (
+        "Project note updated."
+    )
+
+    notified_response = obsidian_client.post(
+        f"/obsidian/jobs/{job_id}/notified", headers=auth(TELEGRAM_TOKEN)
+    )
+    final_response = obsidian_client.get(
+        f"/obsidian/jobs/{job_id}", headers=auth(TELEGRAM_TOKEN)
+    )
+
+    assert notified_response.status_code == 200
+    assert notified_response.json()["result_notified_at"] is not None
+    assert final_response.status_code == 200
+    assert final_response.json()["payload"] == payload
+    assert final_response.json()["result_notified_at"] is not None
+
+
 def test_missing_auth_rejected(obsidian_client):
     response = obsidian_client.post(
         "/obsidian/jobs",
