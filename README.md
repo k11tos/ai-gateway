@@ -127,13 +127,66 @@ Response behavior for `POST /chat` and `POST /generate`:
 
 If both `MODEL_ALIAS_*` and `MODEL_ALIASES` define the same alias key, `MODEL_ALIASES` wins for that key.
 
-## Obsidian job result retention
+## Wiki job transport contract
 
-The Obsidian endpoints are a job queue and result transport layer only. New jobs are restricted to the gateway-owned command allowlist: `ask`, `draft`, `ingest`, `lint`, `refactor`, `save`, `status`, and `update`. New `capture` jobs are rejected, while historical persisted `capture` jobs and their results remain readable through the existing lookup endpoints. Command payloads are otherwise opaque dictionaries: their shape and interpretation belong to the worker. A lint request uses `{}` or `{"instruction":"optional text"}` as its payload. A preview-only refactor request uses `{"mode":"preview","instruction":"non-empty text"}`; the gateway preserves this object as-is and does not translate it to another request shape or validate worker-owned fields. The gateway performs no linting, refactoring, file inspection, vault access, command execution, or LLM work. It stores command metadata, payloads, status, final result/error text, and timestamps.
+The `/obsidian` API is limited to authenticated **auth, queue, job, result,
+error, and notification transport**. The gateway persists job envelopes and
+moves them through lifecycle states; it does not interpret instructions,
+inspect files or vaults, execute wiki commands, perform LLM work, or deliver
+notifications itself.
 
-An authenticated worker can resolve the `source_job_id` carried by a `save` job with the worker-only `GET /obsidian/worker/jobs/{source_job_id}` endpoint using `Authorization: Bearer <OBSIDIAN_WORKER_TOKEN>`. Its detail response includes `job_id`, `command`, the original `payload`, `status`, `result_text`, `error_text`, and lifecycle timestamps. The client-facing `GET /obsidian/jobs/{job_id}` endpoint remains restricted to `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN`. A save request is transported as `{"command":"save","payload":{"source_job_id":"..."}}`; like other command payloads, the gateway preserves that payload without interpreting or validating worker-owned semantics.
+### Compatibility decision
 
-Configure temporary payload retention with:
+`draft` remains accepted. It is part of the current command allowlist, so
+removing it would reject requests that the gateway currently accepts. The
+gateway assigns no special payload schema or processing behavior to it; its
+payload remains an opaque object, like the other commands. New `capture` jobs
+remain rejected. Rows containing the historical `capture` command can still be
+claimed, completed, and read because persisted job commands are not revalidated
+on those paths. This is historical-data compatibility, not a supported capture
+workflow.
+
+New jobs accept `ask`, `draft`, `ingest`, `lint`, `refactor`, `save`, `status`,
+and `update`. Payloads are JSON objects and are serialized for persistence,
+then returned as the same JSON value; the gateway does not validate or rewrite
+worker-owned payload fields.
+
+### Supported shared payloads
+
+| Command | Supported payload sent by clients | Gateway behavior |
+| --- | --- | --- |
+| `update` | `{"instruction":"..."}` | Stores and forwards the object unchanged. |
+| `save` | `{"source_job_id":"..."}` | Stores and forwards the object unchanged; it does not validate the referenced job. |
+| `lint` | `{}` or `{"instruction":"..."}` | Stores and forwards either object unchanged. |
+| `refactor` | `{"mode":"preview","instruction":"..."}` | Stores and forwards the object unchanged; it does not enforce mode or instruction semantics. |
+
+All other allowed commands also carry opaque JSON-object payloads. The table
+records the shared transport shapes for the implemented wiki operations; it
+does not make the gateway the owner of their semantics.
+
+### Authentication and lifecycle endpoints
+
+| Endpoint | Credential | Transport behavior |
+| --- | --- | --- |
+| `POST /obsidian/jobs` | `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN` | Validates the command allowlist, stores the envelope, and returns its ID and `queued` status. |
+| `GET /obsidian/jobs/next` | `OBSIDIAN_WORKER_TOKEN` | Atomically claims the oldest queued job and returns it with `running` status, or returns an empty response. |
+| `POST /obsidian/jobs/{job_id}/result` | `OBSIDIAN_WORKER_TOKEN` | Finalizes a running job as `succeeded` or `failed` and stores result/error text. |
+| `GET /obsidian/worker/jobs/{job_id}` | `OBSIDIAN_WORKER_TOKEN` | Returns a job, including its original payload and result/error fields; this lets a worker resolve a save job's `source_job_id`. |
+| `GET /obsidian/jobs/{job_id}` | `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN` | Returns the complete persisted job envelope. |
+| `GET /obsidian/jobs/{job_id}/result` | `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN` | Returns command, status, result/error text, and completion time. |
+| `GET /obsidian/jobs/notifications/next` | `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN` | Leases the oldest completed, unnotified job that has a chat ID. |
+| `POST /obsidian/jobs/{job_id}/notified` | `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN` | Idempotently records notification acknowledgement for a deliverable completed job. |
+| `GET /obsidian/status` | `OBSIDIAN_TELEGRAM_INTERNAL_TOKEN` | Returns queue counts, the latest completed-job summary, and retention cleanup counts. |
+
+Notification polling returns `{ "job": null, "status": "empty" }` when no job
+is deliverable. Jobs without `telegram_chat_id` remain retrievable but are not
+returned for notification. A notification lease prevents overlapping pollers
+from receiving the same job; after the lease expires, an unacknowledged job is
+eligible again. Acknowledgement requires a completed job with a chat ID.
+
+### Result retention
+
+Configure temporary result/error retention and notification leases with:
 
 ```env
 OBSIDIAN_JOB_RESULT_RETENTION_HOURS=24
@@ -143,17 +196,9 @@ OBSIDIAN_JOB_MAX_ERROR_CHARS=4000
 OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS=300
 ```
 
-Obsidian job results may contain LLM-generated summaries derived from private notes. ai-gateway stores final results temporarily and clears old payloads according to retention settings. Oversized worker result and error text is truncated at write time with an ai-gateway truncation marker.
-
-### Obsidian job notification delivery
-
-`telegram-ai-bot` can durably poll completed worker jobs for automatic delivery back to the original Telegram chat. ai-gateway only tracks queue/result state; it does not send Telegram messages, read the Obsidian vault, or call an LLM.
-
-Authenticated with `Authorization: Bearer <OBSIDIAN_TELEGRAM_INTERNAL_TOKEN>`:
-
-- `GET /obsidian/jobs/notifications/next` atomically leases and returns the oldest completed (`succeeded` or `failed`) job whose `result_notified_at` is still `null`, whose `telegram_chat_id` is present, and whose notification lease is absent or expired. It returns `{ "job": null, "status": "empty" }` when there is nothing to deliver. Jobs without `telegram_chat_id` are still stored but are skipped by notification polling.
-- `POST /obsidian/jobs/{job_id}/notified` idempotently sets `result_notified_at` after `telegram-ai-bot` sends or intentionally acknowledges the result. Worker credentials cannot use this endpoint, and queued/running jobs or completed jobs without `telegram_chat_id` return `409 Conflict` instead of being acknowledged.
-
-`OBSIDIAN_JOB_NOTIFICATION_LEASE_SECONDS` controls how long a claimed notification remains hidden from other pollers before it can be returned again. The default is 300 seconds, so overlapping pollers do not receive the same job while crashed bots still recover pending deliveries after the lease expires.
-
-If result retention has already cleared `result_text` or `error_text`, notification polling may still return the completed job so the bot can display a helpful expired-result message. Failed jobs are returned even when `error_text` is empty. Existing direct lookup endpoints such as `GET /obsidian/jobs/{job_id}` and `GET /obsidian/jobs/{job_id}/result` continue to support manual `/wiki result <job_id>` flows.
+Successful result text and failed error text are cleared after their respective
+retention windows when cleanup runs. Oversized text is truncated at write time
+with an ai-gateway marker. Cleanup does not delete job metadata or the original
+command payload. Consequently, a notification can still identify a completed
+job after its result/error text has expired. The default notification lease is
+300 seconds.
