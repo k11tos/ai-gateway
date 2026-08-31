@@ -50,7 +50,7 @@ jobs:
       - name: Validate application import
         run: |
           set -euo pipefail
-          python -c "import app; assert hasattr(app, 'app'), 'Expected FastAPI app instance `app` in app.py'; print('Imported app module successfully')"
+          python -c "import app; assert hasattr(app, 'app'), 'Expected FastAPI app instance app in app.py'; print('Imported app module successfully')"
 
       - name: FastAPI lightweight startup check
         run: |
