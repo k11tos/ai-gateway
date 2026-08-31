@@ -113,7 +113,9 @@ def test_historical_capture_job_remains_readable(tmp_path, monkeypatch):
         result_text="legacy result",
         error_text=None,
     )
-    client = TestClient(create_obsidian_router(lambda: store))
+    api = FastAPI()
+    api.include_router(create_obsidian_router(lambda: store))
+    client = TestClient(api)
 
     response = client.get(
         f"/obsidian/jobs/{historical['job_id']}", headers=auth(TELEGRAM_TOKEN)
