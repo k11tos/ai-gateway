@@ -1,4 +1,4 @@
-fastapi==0.143.2
+fastapi==0.161.1
 pydantic==2.14.1
 python-dotenv==1.2.4
 requests==2.34.2
