@@ -3,5 +3,5 @@ pydantic==2.14.1
 python-dotenv==1.2.4
 requests==2.34.2
 uvicorn==0.54.0
-pytest==9.1.1
+pytest==9.2.0
 httpx2
