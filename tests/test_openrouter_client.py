@@ -1,8 +1,10 @@
+import io
 import json
 from unittest.mock import Mock
 
 import pytest
 import requests
+from requests.models import Response
 
 import app
 import ollama_client as upstream
@@ -20,8 +22,8 @@ def response(data=None, status=200, lines=()):
 
 def sse(*events):
     for event in events:
-        yield "data: " + (event if isinstance(event, str) else json.dumps(event))
-        yield ""
+        yield ("data: " + (event if isinstance(event, str) else json.dumps(event))).encode("utf-8")
+        yield b""
 
 
 def delta(content=None, finish=None):
@@ -248,3 +250,33 @@ def test_non_stream_failure_with_partial_content_is_rejected(session):
     session.post.return_value = response({"choices": [{"message": {"content": "partial"}, "finish_reason": "error"}]})
     with pytest.raises(upstream.UpstreamServiceError):
         upstream.generate("hi", MODEL)
+
+
+def test_utf8_sse_with_missing_charset_preserves_unicode():
+    # Use Requests' real Response.iter_lines path, with a content type that
+    # intentionally has no charset and actual UTF-8 wire bytes.
+    text = "한국어 안녕 — café — 東京 🐈"
+    events = [delta(text), delta(finish="stop"), "[DONE]"]
+    raw = b"".join(("data: " + (e if isinstance(e, str) else json.dumps(e, ensure_ascii=False)) + "\r\n\r\n").encode("utf-8") for e in events)
+    reply = Response()
+    reply.status_code = 200
+    reply.headers["Content-Type"] = "text/event-stream"
+    reply.raw = io.BytesIO(raw)
+    assert reply.encoding is None
+    chunks = list(upstream._iter_stream_lines(reply))
+    assert [json.loads(chunk) for chunk in chunks] == [
+        {"response": text, "done": False}, {"done": True}
+    ]
+    assert sum(json.loads(chunk).get("done") is True for chunk in chunks) == 1
+
+
+def test_invalid_utf8_sse_raises_safe_upstream_error():
+    reply = Mock()
+    reply.iter_lines.return_value = iter([b"data: \xff", b""])
+    chunks = []
+    with pytest.raises(upstream.UpstreamServiceError, match="response invalid") as exc:
+        for chunk in upstream._iter_stream_lines(reply):
+            chunks.append(chunk)
+    assert chunks == []
+    assert "\xff" not in str(exc.value)
+    reply.close.assert_called_once()

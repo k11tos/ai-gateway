@@ -184,9 +184,9 @@ def generate_stream(prompt, model):
 def _sse_data(response):
     """Collect SSE data fields, ignoring comments/keepalives and other fields."""
     fields = []
-    for line in response.iter_lines(decode_unicode=True):
+    for line in response.iter_lines(decode_unicode=False):
         if isinstance(line, bytes):
-            line = line.decode("utf-8")
+            line = line.decode("utf-8", errors="strict")
         if not line:
             if fields:
                 yield "\n".join(fields)
