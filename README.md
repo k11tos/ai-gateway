@@ -9,10 +9,51 @@ pip install -r requirements.txt
 ```
 
 
+## OpenRouter 설정
+
+`.env.example`을 참고해 로컬 `.env` 또는 실행 환경에 설정합니다. API 키는 저장소에 커밋하지 마세요.
+
+```env
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=your-openrouter-api-key
+DEFAULT_MODEL=google/gemma-4-26b-a4b-it:free
+```
+
+추가 Python 의존성 없이 기존 `requests`를 사용합니다. 호출부 호환을 위해
+`ollama_client.py` 파일명과 `generate`, `generate_stream`, `list_models`,
+`health_check` 인터페이스는 유지하지만 Ollama 구현과 지원은 제거했습니다.
+
+- `/chat`, `/generate`의 `prompt`, `model`, `preset` 및 문자열 `response` 계약은 유지합니다.
+  provider를 생략하는 Telegram AI Bot은 수정 없이 기본 `openrouter`를 사용합니다.
+  `provider=ollama`를 명시하거나 예전 모델 ID를 보내는 클라이언트 설정은 변경이 필요합니다.
+- 추론은 alias 해석 후 모델 ID가 정확히 `:free`로 끝날 때만 허용합니다. 그 외는 `400`입니다.
+  유료 모델 fallback은 없으며 업스트림 요청에 토큰 가격 상한 0도 지정합니다.
+  무료 모델의 가용성·쿼터·속도 제한은 OpenRouter 정책을 따릅니다. 모델이 없거나
+  한도를 초과하면 오류를 반환하며 다른 모델로 자동 교체하지 않습니다.
+- `/generate_stream`은 OpenRouter SSE를 기존 NDJSON
+  `{"response":"...","done":false}` 및 `{"done":true}`로 변환합니다.
+  성공 finish(`stop` 또는 `length`)와 `[DONE]`을 모두 확인한 경우에만 `done:true`를 보냅니다.
+  `[DONE]` 없는 EOF는 incomplete로 기록합니다. SSE 오류·잘못된 데이터·연결 예외는
+  failure로 기록하고 스트림을 중단합니다. 응답 헤더 전송 후에는 HTTP 상태를 바꿀 수
+  없으므로 클라이언트는 `done:true` 없는 스트림을 성공으로 처리하면 안 됩니다.
+- `/health/ready`와 `/health`는 인증이 필요한 `/key`를 호출합니다. 키 누락·인증 실패·
+  연결 실패·잘못된 응답은 `503`입니다. 이 검사는 추론을 실행하지 않으므로 개별 모델의
+  가용성이나 남은 무료 추론 쿼터까지 보장하지 않습니다.
+- 업스트림 오류는 안전한 고정 메시지와 HTTP 상태만 노출합니다. 키·업스트림 본문·
+  원본 requests 예외는 로그와 HTTP 오류에 포함하지 않습니다.
+- `/config`는 `openrouter_configured`와 `openrouter_*_timeout_s`를 반환합니다.
+  URL·API 키는 노출하지 않습니다. `/providers`는 `openrouter`만 반환합니다.
+
+타임아웃은 `REQUEST_TIMEOUT`(기본 90초)을 공통 기본값으로 사용하며,
+`OPENROUTER_CONNECT_TIMEOUT`, `OPENROUTER_READ_TIMEOUT`,
+`OPENROUTER_STREAM_READ_TIMEOUT`으로 각각 재정의할 수 있습니다.
+`RETRY_COUNT`(기본 2)는 요청 시작 중 연결 예외의 재시도 횟수입니다.
+HTTP 오류와 시작된 스트림은 재시도하지 않습니다.
+
 ## API
 
 - `GET /health/live`: 프로세스 liveness 전용 체크 (`200` 고정)
-- `GET /health/ready`: Ollama upstream readiness 체크, upstream 장애 시 `503` 반환
+- `GET /health/ready`: OpenRouter upstream readiness 체크, upstream 장애 시 `503` 반환
 - `GET /health`: 기존 호환용 endpoint로 `GET /health/ready`와 동일 동작
 - `POST /chat`: 기본 텍스트 생성 엔드포인트
 - `POST /generate`: `POST /chat`와 동일 동작(하위 호환용, deprecated)
@@ -20,9 +61,9 @@ pip install -r requirements.txt
 - `GET /providers`: provider discovery endpoint (`supported_providers`, `default_provider`)
 - `GET /metrics`: in-memory request counters for lightweight operational visibility
 - `GET /version`: build/version metadata summary
-- `GET /models`: model discovery endpoint
+- `GET /models`: `:free`로 끝나는 모델 ID만 `{"models": ["..."]}` 형태로 반환
 - `POST /generate_stream`: streaming generation endpoint
-- `POST /embedding`: embedding endpoint
+- `POST /embedding`: 무료 대체 모델 미확정으로 `501 Not Implemented` 반환 (외부 호출 없음)
 
 신규 클라이언트는 `POST /chat` 사용을 권장합니다.
 
@@ -44,8 +85,8 @@ Notes:
 
 ### Provider behavior (current)
 
-- Current support: the gateway currently supports only `ollama`.
-- Request field relationship: the `provider` field in `POST /chat`, `POST /generate`, and `POST /generate_stream` is validated against supported providers. If omitted, the gateway uses the `default_provider` (`ollama`).
+- Current support: the gateway currently supports only `openrouter`.
+- Request field relationship: the `provider` field in `POST /chat`, `POST /generate`, and `POST /generate_stream` is validated against supported providers. If omitted, the gateway uses the `default_provider` (`openrouter`).
 - Unsupported handling: if `provider` is present but not supported, the request is rejected with `400 Bad Request` and an error message listing supported providers.
 - Practical guidance: clients should treat `provider` as a validated selector (not a free-form hint) and can call `GET /providers` to discover the current supported/default values.
 
@@ -111,13 +152,13 @@ Configure aliases with either dedicated environment variables:
 Or provide a comma-separated mapping with `MODEL_ALIASES`, for example:
 
 ```bash
-MODEL_ALIASES="fast=llama3.2:3b,smart=llama3.1:8b,coding=qwen2.5-coder:7b"
+MODEL_ALIASES="fast=google/gemma-4-26b-a4b-it:free,smart=google/gemma-4-26b-a4b-it:free,coding=google/gemma-4-26b-a4b-it:free"
 ```
 
 Resolution rules:
 
 1. The requested model is looked up in the alias table.
-2. If an alias exists, the mapped model is sent to Ollama.
+2. If an alias exists, the mapped model is sent to OpenRouter.
 3. If no alias exists, the requested model is used unchanged.
 4. If no model is requested, `DEFAULT_MODEL` is used.
 
