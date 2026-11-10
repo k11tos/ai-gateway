@@ -101,7 +101,7 @@ def test_chat_uses_default_model_when_omitted(client, monkeypatch):
     }
 
 
-def test_chat_accepts_ollama_provider(client, monkeypatch):
+def test_chat_accepts_openrouter_provider(client, monkeypatch):
     calls = {}
 
     def fake_generate(prompt, model):
@@ -112,7 +112,7 @@ def test_chat_accepts_ollama_provider(client, monkeypatch):
     monkeypatch.setattr(app, "generate", fake_generate)
 
     response = client.post(
-        "/chat", json={"prompt": "hello", "provider": "ollama"}
+        "/chat", json={"prompt": "hello", "provider": "openrouter"}
     )
 
     assert response.status_code == 200
@@ -120,7 +120,7 @@ def test_chat_accepts_ollama_provider(client, monkeypatch):
     assert response.json()["provider"] == app.DEFAULT_PROVIDER
 
 
-def test_chat_accepts_normalized_ollama_provider(client, monkeypatch):
+def test_chat_accepts_normalized_openrouter_provider(client, monkeypatch):
     calls = {}
 
     def fake_generate(prompt, model):
@@ -131,7 +131,7 @@ def test_chat_accepts_normalized_ollama_provider(client, monkeypatch):
     monkeypatch.setattr(app, "generate", fake_generate)
 
     response = client.post(
-        "/chat", json={"prompt": "hello", "provider": " OLLAMA "}
+        "/chat", json={"prompt": "hello", "provider": " OPENROUTER "}
     )
 
     assert response.status_code == 200
@@ -145,7 +145,7 @@ def test_chat_rejects_unsupported_provider(client):
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "Unsupported provider 'openai'. Supported providers: ollama"
+        "detail": "Unsupported provider 'openai'. Supported providers: openrouter"
     }
 
 
@@ -385,7 +385,7 @@ def test_generate_rejects_unsupported_provider(client):
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "Unsupported provider 'anthropic'. Supported providers: ollama"
+        "detail": "Unsupported provider 'anthropic'. Supported providers: openrouter"
     }
 
 
@@ -396,7 +396,7 @@ def test_generate_stream_rejects_unsupported_provider(client):
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "Unsupported provider 'gemini'. Supported providers: ollama"
+        "detail": "Unsupported provider 'gemini'. Supported providers: openrouter"
     }
 
 
@@ -592,24 +592,25 @@ def test_presets_names_are_unique(client):
 
 
 def test_config_endpoint_returns_safe_runtime_summary(client, monkeypatch):
-    monkeypatch.setattr(app, "DEFAULT_MODEL", "deepseek-r1:8b")
-    monkeypatch.setattr(app, "OLLAMA_BASE_URL", "http://ollama.local:11434")
+    monkeypatch.setattr(app, "DEFAULT_MODEL", "google/gemma-4-26b-a4b-it:free")
+    monkeypatch.setattr(app, "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setattr(app, "OPENROUTER_API_KEY", "test-secret")
     monkeypatch.setattr(app, "LEGACY_REQUEST_TIMEOUT", 42.0)
-    monkeypatch.setattr(app, "OLLAMA_CONNECT_TIMEOUT", 3.0)
-    monkeypatch.setattr(app, "OLLAMA_READ_TIMEOUT", 45.0)
-    monkeypatch.setattr(app, "OLLAMA_STREAM_READ_TIMEOUT", 120.0)
+    monkeypatch.setattr(app, "OPENROUTER_CONNECT_TIMEOUT", 3.0)
+    monkeypatch.setattr(app, "OPENROUTER_READ_TIMEOUT", 45.0)
+    monkeypatch.setattr(app, "OPENROUTER_STREAM_READ_TIMEOUT", 120.0)
     monkeypatch.setattr(app, "RETRY_COUNT", 5)
 
     response = client.get("/config")
 
     assert response.status_code == 200
     assert response.json() == {
-        "default_model": "deepseek-r1:8b",
-        "ollama_configured": True,
+        "default_model": "google/gemma-4-26b-a4b-it:free",
+        "openrouter_configured": True,
         "request_timeout_s": 42.0,
-        "ollama_connect_timeout_s": 3.0,
-        "ollama_read_timeout_s": 45.0,
-        "ollama_stream_read_timeout_s": 120.0,
+        "openrouter_connect_timeout_s": 3.0,
+        "openrouter_read_timeout_s": 45.0,
+        "openrouter_stream_read_timeout_s": 120.0,
         "retry_count": 5,
     }
 
@@ -619,20 +620,20 @@ def test_providers_endpoint_returns_discovery_payload(client):
 
     assert response.status_code == 200
     assert response.json() == {
-        "supported_providers": ["ollama"],
-        "default_provider": "ollama",
+        "supported_providers": ["openrouter"],
+        "default_provider": "openrouter",
     }
 
 
 def test_provider_validation_uses_supported_providers_source_of_truth(client, monkeypatch):
-    monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("ollama", "openai"))
+    monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("openrouter", "openai"))
     monkeypatch.setattr(app, "DEFAULT_PROVIDER", "openai")
     monkeypatch.setattr(
         app,
         "PROVIDER_ADAPTERS",
         {
-            "ollama": app.PROVIDER_ADAPTERS["ollama"],
-            "openai": app.PROVIDER_ADAPTERS["ollama"],
+            "openrouter": app.PROVIDER_ADAPTERS["openrouter"],
+            "openai": app.PROVIDER_ADAPTERS["openrouter"],
         },
     )
 
@@ -640,7 +641,7 @@ def test_provider_validation_uses_supported_providers_source_of_truth(client, mo
 
     assert response.status_code == 200
     assert response.json() == {
-        "supported_providers": ["ollama", "openai"],
+        "supported_providers": ["openrouter", "openai"],
         "default_provider": "openai",
     }
 
@@ -662,13 +663,13 @@ def test_provider_validation_uses_supported_providers_source_of_truth(client, mo
 
     assert rejected.status_code == 400
     assert rejected.json() == {
-        "detail": "Unsupported provider 'anthropic'. Supported providers: ollama, openai"
+        "detail": "Unsupported provider 'anthropic'. Supported providers: openrouter, openai"
     }
 
 
 def test_provider_adapter_resolution_fails_when_supported_provider_has_no_adapter(client, monkeypatch):
-    monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("ollama", "openai"))
-    monkeypatch.setattr(app, "PROVIDER_ADAPTERS", {"ollama": app.PROVIDER_ADAPTERS["ollama"]})
+    monkeypatch.setattr(app, "SUPPORTED_PROVIDERS", ("openrouter", "openai"))
+    monkeypatch.setattr(app, "PROVIDER_ADAPTERS", {"openrouter": app.PROVIDER_ADAPTERS["openrouter"]})
 
     response = client.post("/chat", json={"prompt": "hello", "provider": "openai"})
 

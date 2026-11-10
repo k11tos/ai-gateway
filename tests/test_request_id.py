@@ -165,7 +165,7 @@ def test_generate_stream_logs_incomplete_outcome_when_upstream_missing_done(clie
     assert caplog.text.count("stream_done_missing request_id=stream-log-2") == 1
     assert (
         "phase=complete endpoint=/generate_stream request_id=stream-log-2 "
-        "model=deepseek-r1:8b provider=ollama outcome=incomplete"
+        "model=google/gemma-4-26b-a4b-it:free provider=openrouter outcome=incomplete"
     ) in caplog.text
 
 
@@ -190,6 +190,6 @@ def test_generate_stream_logs_failure_outcome_on_stream_exception(client, monkey
 
     assert (
         "phase=complete endpoint=/generate_stream request_id=stream-log-3 "
-        "model=deepseek-r1:8b provider=ollama outcome=failure"
+        "model=google/gemma-4-26b-a4b-it:free provider=openrouter outcome=failure"
     ) in caplog.text
     assert "error=stream boom" in caplog.text

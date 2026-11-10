@@ -17,11 +17,11 @@ class OperationalRouterDependencies(Protocol):
     def _metrics_snapshot(self) -> dict[str, int]: ...
     preset_service: Any
     DEFAULT_MODEL: str
-    OLLAMA_BASE_URL: str | None
+    OPENROUTER_CONFIGURED: bool
     LEGACY_REQUEST_TIMEOUT: float
-    OLLAMA_CONNECT_TIMEOUT: float
-    OLLAMA_READ_TIMEOUT: float
-    OLLAMA_STREAM_READ_TIMEOUT: float
+    OPENROUTER_CONNECT_TIMEOUT: float
+    OPENROUTER_READ_TIMEOUT: float
+    OPENROUTER_STREAM_READ_TIMEOUT: float
     RETRY_COUNT: int
     SUPPORTED_PROVIDERS: tuple[str, ...]
     DEFAULT_PROVIDER: str
@@ -137,11 +137,11 @@ def create_operational_router(deps: OperationalRouterDependencies) -> APIRouter:
 
         return {
             "default_model": deps.DEFAULT_MODEL,
-            "ollama_configured": bool(deps.OLLAMA_BASE_URL),
+            "openrouter_configured": deps.OPENROUTER_CONFIGURED,
             "request_timeout_s": deps.LEGACY_REQUEST_TIMEOUT,
-            "ollama_connect_timeout_s": deps.OLLAMA_CONNECT_TIMEOUT,
-            "ollama_read_timeout_s": deps.OLLAMA_READ_TIMEOUT,
-            "ollama_stream_read_timeout_s": deps.OLLAMA_STREAM_READ_TIMEOUT,
+            "openrouter_connect_timeout_s": deps.OPENROUTER_CONNECT_TIMEOUT,
+            "openrouter_read_timeout_s": deps.OPENROUTER_READ_TIMEOUT,
+            "openrouter_stream_read_timeout_s": deps.OPENROUTER_STREAM_READ_TIMEOUT,
             "retry_count": deps.RETRY_COUNT,
         }
 

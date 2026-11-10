@@ -134,7 +134,7 @@ def test_chat_invalid_provider_increments_metrics_and_errors(client):
 
     assert response.status_code == 400
     assert response.json() == {
-        'detail': "Unsupported provider 'openai'. Supported providers: ollama"
+        'detail': "Unsupported provider 'openai'. Supported providers: openrouter"
     }
     assert _metrics(client) == {
         'requests_total': 1,
@@ -153,7 +153,7 @@ def test_generate_stream_invalid_provider_increments_metrics_and_errors(client):
 
     assert response.status_code == 400
     assert response.json() == {
-        'detail': "Unsupported provider 'gemini'. Supported providers: ollama"
+        'detail': "Unsupported provider 'gemini'. Supported providers: openrouter"
     }
     assert _metrics(client) == {
         'requests_total': 1,
@@ -172,7 +172,7 @@ def test_generate_invalid_provider_preserves_existing_metric_behavior(client):
 
     assert response.status_code == 400
     assert response.json() == {
-        'detail': "Unsupported provider 'gemini'. Supported providers: ollama"
+        'detail': "Unsupported provider 'gemini'. Supported providers: openrouter"
     }
     assert _metrics(client) == {
         'requests_total': 0,

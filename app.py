@@ -34,11 +34,12 @@ from routes.operational import (
 )
 from routes.obsidian import create_obsidian_router
 from ollama_client import (
-    OLLAMA_BASE_URL,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_API_KEY,
     LEGACY_REQUEST_TIMEOUT,
-    OLLAMA_CONNECT_TIMEOUT,
-    OLLAMA_READ_TIMEOUT,
-    OLLAMA_STREAM_READ_TIMEOUT,
+    OPENROUTER_CONNECT_TIMEOUT,
+    OPENROUTER_READ_TIMEOUT,
+    OPENROUTER_STREAM_READ_TIMEOUT,
     RETRY_COUNT,
     UpstreamServiceError,
     embedding,
@@ -50,12 +51,12 @@ from ollama_client import (
 
 load_dotenv()
 
-DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "deepseek-r1:8b")
-DEFAULT_PROVIDER = "ollama"
+DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "google/gemma-4-26b-a4b-it:free")
+DEFAULT_PROVIDER = "openrouter"
 SUPPORTED_PROVIDERS = (DEFAULT_PROVIDER,)
 
 
-def _build_ollama_provider_adapter() -> ProviderAdapter:
+def _build_openrouter_provider_adapter() -> ProviderAdapter:
     return CallableProviderAdapter(
         generate_fn=lambda *, prompt, model: generate(prompt=prompt, model=model),
         generate_stream_fn=lambda *, prompt, model: generate_stream(prompt=prompt, model=model),
@@ -65,7 +66,7 @@ def _build_ollama_provider_adapter() -> ProviderAdapter:
 
 
 PROVIDER_ADAPTERS: dict[str, ProviderAdapter] = {
-    DEFAULT_PROVIDER: _build_ollama_provider_adapter(),
+    DEFAULT_PROVIDER: _build_openrouter_provider_adapter(),
 }
 
 def _load_model_aliases() -> dict[str, str]:
@@ -231,7 +232,7 @@ def _generate_response(
             f"error={str(e)}"
         )
         headers = {"X-Request-Id": request_id} if request_id else None
-        raise HTTPException(status_code=502, detail=str(e), headers=headers) from e
+        raise HTTPException(status_code=e.status_code, detail=str(e), headers=headers) from e
 
     response = _validate_non_blank_provider_response(
         response,
@@ -300,24 +301,24 @@ class AppOperationalRouterDependencies:
         return DEFAULT_MODEL
 
     @property
-    def OLLAMA_BASE_URL(self) -> str | None:
-        return OLLAMA_BASE_URL
+    def OPENROUTER_CONFIGURED(self) -> bool:
+        return bool(OPENROUTER_BASE_URL and OPENROUTER_API_KEY.strip())
 
     @property
     def LEGACY_REQUEST_TIMEOUT(self) -> float:
         return LEGACY_REQUEST_TIMEOUT
 
     @property
-    def OLLAMA_CONNECT_TIMEOUT(self) -> float:
-        return OLLAMA_CONNECT_TIMEOUT
+    def OPENROUTER_CONNECT_TIMEOUT(self) -> float:
+        return OPENROUTER_CONNECT_TIMEOUT
 
     @property
-    def OLLAMA_READ_TIMEOUT(self) -> float:
-        return OLLAMA_READ_TIMEOUT
+    def OPENROUTER_READ_TIMEOUT(self) -> float:
+        return OPENROUTER_READ_TIMEOUT
 
     @property
-    def OLLAMA_STREAM_READ_TIMEOUT(self) -> float:
-        return OLLAMA_STREAM_READ_TIMEOUT
+    def OPENROUTER_STREAM_READ_TIMEOUT(self) -> float:
+        return OPENROUTER_STREAM_READ_TIMEOUT
 
     @property
     def RETRY_COUNT(self) -> int:
@@ -427,7 +428,7 @@ def models(request: Request, response: Response):
             error=str(e),
         )
         raise HTTPException(
-            status_code=502,
+            status_code=e.status_code,
             detail=str(e),
             headers={"X-Request-Id": request_id},
         ) from e
@@ -547,7 +548,7 @@ def embedding_api(req: EmbeddingRequest, request: Request, response: Response):
             error=str(e),
         )
         raise HTTPException(
-            status_code=502,
+            status_code=e.status_code,
             detail=str(e),
             headers={"X-Request-Id": request_id},
         ) from e
@@ -701,7 +702,7 @@ def generate_stream_api(req: ChatRequest, request: Request):
             error=str(e),
         )
         raise HTTPException(
-            status_code=502,
+            status_code=e.status_code,
             detail=str(e),
             headers={"X-Request-Id": request_id},
         ) from e
